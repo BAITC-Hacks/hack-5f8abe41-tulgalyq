@@ -93,7 +93,15 @@ function qualityIssue(name, value) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(path, {headers:{"Content-Type":"application/json"}, ...options});
+  let response;
+  try {
+    response = await fetch(path, {headers:{"Content-Type":"application/json"}, ...options});
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error("Связь с локальным сервером прервалась. Попробуйте ещё раз — введённые ответы остались в форме.");
+    }
+    throw error;
+  }
   const data = await response.json();
   if (!response.ok) {
     const error = new Error(data.error || "Не удалось выполнить действие.");
@@ -271,7 +279,10 @@ $("questions-form").addEventListener("submit",async(event)=>{
     if (review.fallback_reason && review.checked) {
       showNotice("Ответы прошли только локальную проверку: AI сейчас недоступен. Проверьте их смысл перед публикацией.");
     }
-  } catch(error) { showNotice(error.message,true); }
+  } catch(error) {
+    status.textContent = "Проверка прервалась. Ответы остались в форме — попробуйте ещё раз.";
+    showNotice(error.message,true);
+  }
   finally { button.disabled = false; }
 });
 $("card-form").addEventListener("submit",async(event)=>{

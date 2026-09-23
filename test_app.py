@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 from urllib.parse import quote
 import json
 import os
+import socket
 import sqlite3
 import unittest
 from unittest.mock import patch
@@ -382,6 +383,30 @@ class AppTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(review["source"], "local")
         self.assertEqual(review["fallback_reason"], "api_unavailable")
+
+    def test_socket_timeout_returns_local_fallback_instead_of_dropping_connection(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
+        task_id = task["id"]
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-secret"}), \
+                patch.object(app, "urlopen", side_effect=socket.timeout("read timed out")):
+            code, questions = self.api(f"/api/tasks/{task_id}/ai-questions", "POST", {"answers": {}})
+            self.assertEqual(code, 200)
+            self.assertEqual(questions["source"], "local")
+            self.assertEqual(questions["fallback_reason"], "api_unavailable")
+
+            code, review = self.api(f"/api/tasks/{task_id}/review", "POST", {"answers": [
+                {"field": "need", "answer": "Сократить ожидание учеников у стойки выдачи"},
+            ]})
+            self.assertEqual(code, 200)
+            self.assertEqual(review["source"], "local")
+            self.assertEqual(review["fallback_reason"], "api_unavailable")
+
+            self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {
+                "need": "Сократить ожидание учеников у стойки выдачи",
+            }})
+            code, published = self.api(f"/api/tasks/{task_id}/confirm", "POST")
+            self.assertEqual(code, 200)
+            self.assertEqual(published["review_fallback_reason"], "api_unavailable")
 
     def test_openai_review_uses_structured_output_and_local_contact_check(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})

@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 import json
 import os
 import re
+import socket
 import sqlite3
 import threading
 import uuid
@@ -326,7 +327,7 @@ def ai_questions(task):
                  for part in item.get("content", []) if part.get("type") == "output_text"]
         parsed = json.loads("".join(texts))
         return validate_ai_questions(parsed["questions"], allowed)
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
+    except (HTTPError, URLError, TimeoutError, socket.timeout, json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
         raise ValueError("AI сейчас недоступен. Используйте обычные уточняющие вопросы.") from error
 
 
@@ -363,7 +364,7 @@ def gemini_questions(task):
         output = "".join(part["text"] for part in content["parts"]
                          if "text" in part and not part.get("thought"))
         return validate_ai_questions(json.loads(output)["questions"], allowed)
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError, AttributeError, IndexError) as error:
+    except (HTTPError, URLError, TimeoutError, socket.timeout, json.JSONDecodeError, KeyError, TypeError, AttributeError, IndexError) as error:
         raise ValueError("Gemini сейчас недоступен. Используйте обычные уточняющие вопросы.") from error
 
 
@@ -464,7 +465,7 @@ def gemini_review(task, entries):
         output = "".join(part["text"] for part in candidates[0]["content"]["parts"]
                          if "text" in part and not part.get("thought"))
         return validate_ai_review(json.loads(output)["items"], entries)
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError, AttributeError, IndexError) as error:
+    except (HTTPError, URLError, TimeoutError, socket.timeout, json.JSONDecodeError, KeyError, TypeError, AttributeError, IndexError) as error:
         raise ValueError("Gemini сейчас недоступен для проверки ответов.") from error
 
 
@@ -489,7 +490,7 @@ def openai_review(task, entries):
         texts = [part["text"] for item in result.get("output", []) if item.get("type") == "message"
                  for part in item.get("content", []) if part.get("type") == "output_text"]
         return validate_ai_review(json.loads("".join(texts))["items"], entries)
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError, AttributeError, IndexError) as error:
+    except (HTTPError, URLError, TimeoutError, socket.timeout, json.JSONDecodeError, KeyError, TypeError, AttributeError, IndexError) as error:
         raise ValueError("AI сейчас недоступен для проверки ответов.") from error
 
 
