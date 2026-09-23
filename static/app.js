@@ -11,6 +11,7 @@ const READINESS_LABELS = {low:"Нужно уточнить",medium:"Рабоча
 let currentTask = null;
 let selectedCatalogTask = null;
 let proposalTaskFilterValue = "";
+let pendingQuestionAnswers = {};
 const $ = (id) => document.getElementById(id);
 const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value !== undefined) node.textContent = value; return node; };
 
@@ -48,15 +49,19 @@ function showStage(name) {
   $("notice").hidden = true;
   window.scrollTo({top:0,behavior:"smooth"});
 }
-function updateTask(task) { currentTask = task; localStorage.setItem("mission100_task_id", task.id); }
-function buildQuestions() {
+function updateTask(task) {
+  if (currentTask?.id !== task.id) pendingQuestionAnswers = {};
+  currentTask = task;
+  localStorage.setItem("mission100_task_id", task.id);
+}
+function buildQuestions(answers = {}) {
   $("raw-description").textContent = currentTask.raw_description;
   const list = $("questions-list"); list.replaceChildren();
   currentTask.questions.forEach((question, index) => {
     const row = document.createElement("div"); row.className = "question-row";
     const label = document.createElement("label"); label.htmlFor = "answer-"+index; label.textContent = `${String(index+1).padStart(2,"0")}. ${question.text}`;
     const input = document.createElement("textarea"); input.id = "answer-"+index; input.dataset.field = question.field;
-    input.placeholder = "Ваш ответ…"; input.value = currentTask.fields[question.field] || "";
+    input.placeholder = "Ваш ответ…"; input.value = answers[question.field] ?? currentTask.fields[question.field] ?? "";
     row.append(label,input); list.append(row);
   });
 }
@@ -121,10 +126,10 @@ $("draft-form").addEventListener("submit",async (event)=>{
 });
 $("questions-form").addEventListener("submit",async(event)=>{
   event.preventDefault();
-  const fields = Object.fromEntries([...$("questions-list").querySelectorAll("textarea")].map(input=>[input.dataset.field,input.value]));
+  const fields = {...pendingQuestionAnswers, ...Object.fromEntries([...$("questions-list").querySelectorAll("textarea")].map(input=>[input.dataset.field,input.value]))};
   try {
     const task = await request(`/api/tasks/${currentTask.id}`,{method:"PATCH",body:JSON.stringify({fields})});
-    updateTask(task); buildCard(); showStage("card");
+    updateTask(task); pendingQuestionAnswers = {}; buildCard(); showStage("card");
   } catch(error) { showNotice(error.message,true); }
 });
 $("card-form").addEventListener("submit",async(event)=>{
@@ -225,6 +230,7 @@ async function loadWorkspace() {
 }
 async function openEditor(id, questions=false) {
   try {
+    pendingQuestionAnswers = {};
     updateTask(await request(`/api/tasks/${id}`));
     location.hash = "constructor";
     if (questions) { buildQuestions(); $("question-source").textContent = "Уточняющие вопросы по шаблону"; showStage("questions"); }
@@ -343,12 +349,11 @@ async function openTask(id) {
 
 async function loadProposals() {
   try {
-    const [allProposals, teams, tasks] = await Promise.all([request("/api/proposals"), request("/api/teams"), request("/api/workspace/tasks")]);
+    const [allProposals, teams, tasks] = await Promise.all([request("/api/proposals"), request("/api/teams"), request("/api/tasks?sort=newest")]);
     const taskFilter = $("proposal-task-filter");
     const previousTask = proposalTaskFilterValue || taskFilter.value;
     taskFilter.replaceChildren(new Option("Все задачи", ""));
-    tasks.filter(task => task.status === "confirmed" || task.proposal_count).forEach(task =>
-      taskFilter.append(new Option(task.fields.title || task.raw_description, task.id)));
+    tasks.forEach(task => taskFilter.append(new Option(task.fields.title || task.raw_description, task.id)));
     taskFilter.value = previousTask;
     proposalTaskFilterValue = taskFilter.value;
     const status = $("proposal-status-filter").value;
@@ -425,10 +430,12 @@ request("/api/health").then(status => {
 }).catch(() => {});
 $("ai-questions-button").addEventListener("click", async () => {
   const button = $("ai-questions-button"); button.disabled = true;
+  const typedAnswers = Object.fromEntries([...$("questions-list").querySelectorAll("textarea")].map(input => [input.dataset.field, input.value]));
+  pendingQuestionAnswers = {...pendingQuestionAnswers, ...typedAnswers};
   $("question-source").textContent = "AI составляет вопросы…";
   try {
     const result = await request(`/api/tasks/${currentTask.id}/ai-questions`, {method:"POST", body:"{}"});
-    currentTask.questions = result.questions; buildQuestions();
+    currentTask.questions = result.questions; buildQuestions(pendingQuestionAnswers);
     $("question-source").textContent = "Вопросы предложены AI · ответы проверяете вы";
   } catch (error) {
     $("question-source").textContent = "Локальные вопросы · AI недоступен";

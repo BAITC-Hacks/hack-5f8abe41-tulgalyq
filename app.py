@@ -26,9 +26,11 @@ WEIGHTS = {
     "contact": 5, "interaction_format": 5,
 }
 QUESTION_BANK = (
-    ("users", "Для кого именно нужно решение? Кто будет им пользоваться?"),
+    ("need", "Что именно нужно изменить и почему это важно для вашего бизнеса?"),
     ("data", "Какие данные, примеры или материалы вы сможете предоставить команде?"),
     ("success_criteria", "По каким измеримым признакам вы поймёте, что задача решена?"),
+    ("users", "Для кого именно нужно решение? Кто будет им пользоваться?"),
+    ("context", "Как сейчас устроен процесс и где возникает проблема?"),
     ("expected_result", "Какой конкретный результат должна передать вам команда?"),
     ("constraints", "Какие есть сроки, технические ограничения или условия доступа?"),
     ("interaction_format", "Как команда сможет консультироваться с вами и получать обратную связь?"),
@@ -37,7 +39,7 @@ DB_LOCK = threading.Lock()
 
 
 def connect():
-    DB_PATH.parent.mkdir(exist_ok=True)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(str(DB_PATH))
     db.row_factory = sqlite3.Row
     return db
@@ -97,6 +99,14 @@ def clean_text(value, max_length=4000):
 PLACEHOLDERS = {"тест", "test", "нет", "незнаю", "потом", "заполнить", "xxx", "asdf", "qwerty", "йцукен"}
 
 
+def valid_http_url(value):
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme in ("http", "https") and bool(parsed.hostname)
+    except ValueError:
+        return False
+
+
 def quality_issue(name, value):
     """Small, explainable checks for obvious placeholders; not semantic AI judgment."""
     text = value.strip()
@@ -111,7 +121,7 @@ def quality_issue(name, value):
         has_email = bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text))
         has_handle = bool(re.fullmatch(r"@[\w.]{4,}", text, re.UNICODE))
         has_phone = len(re.findall(r"\d", text)) >= 7
-        has_link = text.startswith(("https://", "http://")) and bool(urlparse(text).hostname)
+        has_link = valid_http_url(text)
         if not (has_email or has_handle or has_phone or has_link):
             return "Укажите email, @ник, ссылку или телефон минимум из 7 цифр."
     elif not any(char.isalpha() for char in text):
@@ -176,7 +186,8 @@ def ai_questions(task):
     key = os.getenv("OPENAI_API_KEY", "")
     if not key:
         raise ValueError("AI не настроен: задайте OPENAI_API_KEY на сервере.")
-    allowed = [field for field, _ in QUESTION_BANK if not task["fields"].get(field)]
+    allowed = [field for field, _ in QUESTION_BANK
+               if quality_issue(field, task["fields"].get(field, ""))]
     if len(allowed) < 3:
         allowed = [field for field, _ in QUESTION_BANK]
     schema = {
@@ -189,11 +200,12 @@ def ai_questions(task):
     payload = {
         "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         "instructions": ("Ты редактор бизнес-задач. На русском языке задай ровно 3 разных "
-            "конкретных уточняющих вопроса по данному черновику. Спрашивай только о неизвестных "
-            "сведениях, которые помогут команде решать задачу. Не утверждай неуказанные факты, "
+            "конкретных уточняющих вопроса по исходному описанию и текущей карточке. "
+            "Учитывай уже заполненные поля: спрашивай о неизвестном или о конкретизации "
+            "расплывчатого ответа, не повторяй уже известный факт. Не утверждай неуказанные факты, "
             "не придумывай данные и не заполняй карточку за бизнес. Каждый вопрос должен "
             "соответствовать своему полю и не повторять другие вопросы."),
-        "input": task["raw_description"],
+        "input": json.dumps({"description": task["raw_description"], "fields": task["fields"]}, ensure_ascii=False),
         "text": {"format": {"type": "json_schema", "name": "clarifying_questions", "strict": True, "schema": schema}},
         "store": False,
     }
@@ -212,7 +224,7 @@ def ai_questions(task):
                or not 10 <= len(q["text"].strip()) <= 240 for q in questions):
             raise ValueError("AI вернул некорректные вопросы.")
         return [{"field": q["field"], "text": q["text"].strip()} for q in questions]
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError) as error:
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
         raise ValueError("AI сейчас недоступен. Используйте обычные уточняющие вопросы.") from error
 
 
@@ -295,7 +307,8 @@ def seed_demo():
         if db.execute("SELECT 1 FROM tasks WHERE id = 'demo-card-1'").fetchone():
             return False
         for index, (topic, raw, *values) in enumerate(examples):
-            fields = dict(zip(FIELDS, values))
+            complete_fields = dict(zip(FIELDS, values))
+            fields = complete_fields.copy()
             for missing in (
                 (), ("interaction_format", "contact"),
                 ("data", "interaction_format"),
@@ -308,8 +321,15 @@ def seed_demo():
             encoded_fields = json.dumps(fields, ensure_ascii=False)
             db.execute("INSERT INTO tasks (id, raw_description, topic, fields_json, published_fields_json, status, confirmed_score) VALUES (?, ?, ?, ?, ?, 'confirmed', ?)",
                        (task_id, raw, topic, encoded_fields, encoded_fields, score))
+            draft_fields = {name: "" for name in FIELDS}
+            for name in (
+                (), ("title", "need"), ("title", "context", "need", "users"),
+                ("title", "context", "need", "users", "data", "expected_result"),
+                ("title", "context", "need", "users", "data", "constraints", "expected_result", "success_criteria", "contact"),
+            )[index]:
+                draft_fields[name] = complete_fields[name]
             db.execute("INSERT INTO tasks (id, raw_description, topic, fields_json) VALUES (?, ?, ?, ?)",
-                       (f"demo-draft-{index + 1}", raw, topic, json.dumps({name: "" for name in FIELDS}, ensure_ascii=False)))
+                       (f"demo-draft-{index + 1}", raw, topic, json.dumps(draft_fields, ensure_ascii=False)))
             team_id = f"demo-team-{index + 1}"
             db.execute("INSERT INTO teams (id, name, skills, interests, technologies) VALUES (?, ?, ?, ?, ?)",
                        (team_id, f"Команда {index + 1}", "Дизайн, разработка, исследование", topic, "Python, JavaScript"))
@@ -463,8 +483,8 @@ class Handler(BaseHTTPRequestHandler):
                 url = clean_text(data.get("prototype_url", ""), 500)
                 if len(idea) < 10 or len(plan) < 10:
                     raise ValueError("Опишите идею и план хотя бы одним предложением.")
-                if url and not url.startswith(("https://", "http://")):
-                    raise ValueError("Ссылка на прототип должна начинаться с http:// или https://.")
+                if url and not valid_http_url(url):
+                    raise ValueError("Укажите действительный адрес прототипа с http:// или https://.")
                 task = get_task(task_id)
                 if not task or task["status"] != "confirmed":
                     return self.json_response(404, {"error": "Опубликованная задача не найдена."})
