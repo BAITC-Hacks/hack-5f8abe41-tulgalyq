@@ -80,8 +80,29 @@ class AppTest(unittest.TestCase):
         self.assertEqual(confirmed["points"], 10)
         self.assertEqual(self.api("/api/teams")[1][0]["points"], 10)
         self.assertEqual(self.api(f"/api/progress/{stage['id']}/confirm", "POST")[0], 404)
-        self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {"data": "Анонимные времена заказов"}})
-        self.assertEqual(self.api("/api/tasks")[1], [])
+        _, second_stage = self.api(f"/api/proposals/{proposal_id}/progress", "POST", {"description": "Готов второй этап тестирования"})
+        self.api(f"/api/proposals/{proposal_id}/decision", "POST", {"decision": "rejected"})
+        self.assertEqual(self.api(f"/api/progress/{second_stage['id']}/confirm", "POST")[0], 404)
+        self.assertEqual(self.api("/api/teams")[1][0]["points"], 10)
+        self.api(f"/api/proposals/{proposal_id}/decision", "POST", {"decision": "selected"})
+        self.assertEqual(self.api(f"/api/progress/{second_stage['id']}/confirm", "POST")[0], 200)
+        self.assertEqual(self.api("/api/teams")[1][0]["points"], 20)
+        _, pending = self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {"data": "Анонимные времена заказов"}})
+        self.assertEqual(pending["status"], "confirmed")
+        self.assertTrue(pending["needs_confirmation"])
+        self.assertEqual(pending["preview_score"], 30)
+        self.assertEqual(pending["confirmed_score"], 10)
+        app.init_db()  # Restart migration must not replace the published snapshot.
+        self.assertEqual(self.api(f"/api/tasks/{task_id}?published=1")[1]["fields"]["data"], "")
+        self.assertEqual(self.api("/api/tasks")[1][0]["confirmed_score"], 10)
+        self.assertEqual(self.api("/api/tasks")[1][0]["fields"]["data"], "")
+        self.assertEqual(self.api(f"/api/tasks/{task_id}")[1]["fields"]["data"], "Анонимные времена заказов")
+        self.assertEqual(self.api("/api/proposals", "POST", {"task_id": task_id, "team_id": team["id"],
+            "idea": "Ещё один вариант предзаказа", "plan": "Изучить очередь и проверить прототип"})[0], 201)
+        _, republished = self.api(f"/api/tasks/{task_id}/confirm", "POST")
+        self.assertFalse(republished["needs_confirmation"])
+        self.assertEqual(republished["confirmed_score"], 30)
+        self.assertEqual(self.api("/api/tasks")[1][0]["fields"]["data"], "Анонимные времена заказов")
 
     def test_demo_seed_is_idempotent_and_has_rating_range(self):
         self.api("/api/tasks", "POST", {"description": "Наша отдельная настоящая задача"})
@@ -140,16 +161,22 @@ class MigrationTest(unittest.TestCase):
             app.DB_PATH = Path(folder) / "old.sqlite3"
             try:
                 with sqlite3.connect(app.DB_PATH) as db:
+                    db.execute("CREATE TABLE tasks (id TEXT PRIMARY KEY, raw_description TEXT NOT NULL, topic TEXT NOT NULL, fields_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', confirmed_score INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
                     db.execute("CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, skills TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
                     db.execute("CREATE TABLE proposals (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, team_id TEXT NOT NULL, idea TEXT NOT NULL, plan TEXT NOT NULL, prototype_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+                    fields = {name: "" for name in app.FIELDS}
+                    fields.update(title="Старая задача", need="Сократить время ожидания")
+                    db.execute("INSERT INTO tasks (id, raw_description, topic, fields_json, status, confirmed_score) VALUES ('old-task', 'Длинная очередь на входе', 'Другое', ?, 'confirmed', 10)", (json.dumps(fields),))
                     db.execute("INSERT INTO teams (id, name, skills) VALUES ('old-team', 'Старая команда', 'Дизайн')")
                     db.execute("INSERT INTO proposals (id, task_id, team_id, idea, plan) VALUES ('old-proposal', 'task', 'old-team', 'Идея', 'План')")
                 app.init_db()
                 with app.connect() as db:
                     team = db.execute("SELECT name, interests, technologies FROM teams WHERE id = 'old-team'").fetchone()
                     proposal = db.execute("SELECT deadline FROM proposals WHERE id = 'old-proposal'").fetchone()
+                    published = db.execute("SELECT published_fields_json FROM tasks WHERE id = 'old-task'").fetchone()
                 self.assertEqual((team["name"], team["interests"], team["technologies"]), ("Старая команда", "", ""))
                 self.assertEqual(proposal["deadline"], "")
+                self.assertEqual(json.loads(published["published_fields_json"])["title"], "Старая задача")
             finally:
                 app.DB_PATH = old_path
 

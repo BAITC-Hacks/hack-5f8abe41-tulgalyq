@@ -50,6 +50,7 @@ def init_db():
             raw_description TEXT NOT NULL,
             topic TEXT NOT NULL,
             fields_json TEXT NOT NULL,
+            published_fields_json TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'draft',
             confirmed_score INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -75,6 +76,7 @@ def init_db():
             FOREIGN KEY(proposal_id) REFERENCES proposals(id)
         )""")
         for table, columns in {
+            "tasks": {"published_fields_json": "TEXT NOT NULL DEFAULT ''"},
             "teams": {"interests": "TEXT NOT NULL DEFAULT ''", "technologies": "TEXT NOT NULL DEFAULT ''"},
             "proposals": {"deadline": "TEXT NOT NULL DEFAULT ''"},
         }.items():
@@ -82,6 +84,8 @@ def init_db():
             for column, definition in columns.items():
                 if column not in existing:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        db.execute("""UPDATE tasks SET published_fields_json = fields_json
+            WHERE status = 'confirmed' AND published_fields_json = ''""")
 
 
 def clean_text(value, max_length=4000):
@@ -106,8 +110,10 @@ def readiness_level(score):
     return "priority"
 
 
-def task_from_row(row):
-    fields = json.loads(row["fields_json"])
+def task_from_row(row, published=False):
+    editor_fields = json.loads(row["fields_json"])
+    published_fields = json.loads(row["published_fields_json"]) if row["published_fields_json"] else editor_fields
+    fields = published_fields if published and row["status"] == "confirmed" else editor_fields
     preview_score, earned = score_fields(fields)
     questions = [
         {"field": field, "text": question}
@@ -122,6 +128,7 @@ def task_from_row(row):
         "id": row["id"], "raw_description": row["raw_description"],
         "topic": row["topic"], "fields": fields, "status": row["status"],
         "confirmed_score": row["confirmed_score"],
+        "needs_confirmation": row["status"] == "confirmed" and editor_fields != published_fields and not published,
         "readiness_level": readiness_level(row["confirmed_score"]),
         "preview_score": preview_score, "earned": earned,
         "questions": questions,
@@ -129,10 +136,10 @@ def task_from_row(row):
     }
 
 
-def get_task(task_id):
+def get_task(task_id, published=False):
     with connect() as db:
         row = db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
-    return task_from_row(row) if row else None
+    return task_from_row(row, published=published) if row else None
 
 
 def ai_questions(task):
@@ -184,7 +191,7 @@ def list_tasks(topic="", sort="rating", readiness=""):
     with connect() as db:
         rows = db.execute("SELECT * FROM tasks WHERE status = 'confirmed' AND (? = '' OR topic = ?) ORDER BY created_at DESC, rowid DESC", (topic, topic)).fetchall()
         counts = dict(db.execute("SELECT task_id, COUNT(*) FROM proposals GROUP BY task_id").fetchall())
-    tasks = [task_from_row(row) for row in rows]
+    tasks = [task_from_row(row, published=True) for row in rows]
     for task in tasks:
         task["proposal_count"] = counts.get(task["id"], 0)
     if readiness:
@@ -269,8 +276,9 @@ def seed_demo():
                 fields[missing] = ""
             task_id = f"demo-card-{index + 1}"
             score, _ = score_fields(fields)
-            db.execute("INSERT INTO tasks (id, raw_description, topic, fields_json, status, confirmed_score) VALUES (?, ?, ?, ?, 'confirmed', ?)",
-                       (task_id, raw, topic, json.dumps(fields, ensure_ascii=False), score))
+            encoded_fields = json.dumps(fields, ensure_ascii=False)
+            db.execute("INSERT INTO tasks (id, raw_description, topic, fields_json, published_fields_json, status, confirmed_score) VALUES (?, ?, ?, ?, ?, 'confirmed', ?)",
+                       (task_id, raw, topic, encoded_fields, encoded_fields, score))
             db.execute("INSERT INTO tasks (id, raw_description, topic, fields_json) VALUES (?, ?, ?, ?)",
                        (f"demo-draft-{index + 1}", raw, topic, json.dumps({name: "" for name in FIELDS}, ensure_ascii=False)))
             team_id = f"demo-team-{index + 1}"
@@ -360,7 +368,7 @@ class Handler(BaseHTTPRequestHandler):
                 rows = db.execute("SELECT * FROM progress WHERE proposal_id = ? ORDER BY created_at DESC", (proposal_id,)).fetchall()
             return self.json_response(200, [dict(row) for row in rows])
         if path.startswith("/api/tasks/"):
-            task = get_task(path.rsplit("/", 1)[-1])
+            task = get_task(path.rsplit("/", 1)[-1], published=query.get("published", [""])[0] == "1")
             return self.json_response(200 if task else 404, task or {"error": "Задача не найдена."})
         return self.json_response(404, {"error": "Страница не найдена."})
 
@@ -400,7 +408,9 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Перед подтверждением заполните название и потребность.")
                 score, _ = score_fields(fields)
                 with DB_LOCK, connect() as db:
-                    db.execute("UPDATE tasks SET status = 'confirmed', confirmed_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (score, task_id))
+                    db.execute("""UPDATE tasks SET status = 'confirmed', confirmed_score = ?,
+                        published_fields_json = fields_json, updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                               (score, task_id))
                 return self.json_response(200, get_task(task_id))
             if path == "/api/teams":
                 name = clean_text(data.get("name", ""), 100)
@@ -459,8 +469,11 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/progress/") and path.endswith("/confirm"):
                 progress_id = path.split("/")[3]
                 with DB_LOCK, connect() as db:
-                    changed = db.execute("UPDATE progress SET status = 'confirmed', points = 10 WHERE id = ? AND status = 'pending'", (progress_id,)).rowcount
-                return self.json_response(200 if changed else 404, {"status": "confirmed", "points": 10} if changed else {"error": "Этап не найден или уже подтверждён."})
+                    changed = db.execute("""UPDATE progress SET status = 'confirmed', points = 10
+                        WHERE id = ? AND status = 'pending' AND EXISTS (
+                            SELECT 1 FROM proposals p WHERE p.id = progress.proposal_id AND p.status = 'selected'
+                        )""", (progress_id,)).rowcount
+                return self.json_response(200 if changed else 404, {"status": "confirmed", "points": 10} if changed else {"error": "Этап недоступен, уже подтверждён или команда не выбрана."})
             return self.json_response(404, {"error": "Действие не найдено."})
         except ValueError as error:
             return self.json_response(400, {"error": str(error)})
@@ -484,7 +497,7 @@ class Handler(BaseHTTPRequestHandler):
             if fields == task["fields"]:
                 return self.json_response(200, task)
             with DB_LOCK, connect() as db:
-                db.execute("UPDATE tasks SET fields_json = ?, status = 'draft', confirmed_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                db.execute("UPDATE tasks SET fields_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                            (json.dumps(fields, ensure_ascii=False), task_id))
             return self.json_response(200, get_task(task_id))
         except ValueError as error:

@@ -59,7 +59,7 @@ function fieldsFromForm() {
 function updatePreview() {
   const fields = fieldsFromForm();
   const preview = Object.entries(WEIGHTS).reduce((sum,[name,weight])=>sum+(fields[name]?weight:0),0);
-  const confirmed = currentTask.status === "confirmed" && JSON.stringify(fields) === JSON.stringify(currentTask.fields);
+  const confirmed = currentTask.status === "confirmed" && !currentTask.needs_confirmation && JSON.stringify(fields) === JSON.stringify(currentTask.fields);
   $("score-number").textContent = confirmed ? currentTask.confirmed_score : preview;
   $("score-state").textContent = confirmed ? "Подтверждено" : "Возможный рейтинг";
   $("score-explain").textContent = confirmed
@@ -166,7 +166,8 @@ async function loadWorkspace() {
         el("h2", "", task.fields.title || task.raw_description),
         el("p", "", task.fields.need || task.raw_description));
       const meta = el("div", "workspace-meta");
-      meta.append(el("span", task.status === "confirmed" ? "" : "draft-chip", task.status === "confirmed" ? `В каталоге · ${task.confirmed_score}/100` : `Черновик · возможные ${task.preview_score}/100`),
+      meta.append(el("span", task.status === "confirmed" ? (task.needs_confirmation ? "draft-chip" : "") : "draft-chip",
+        task.status === "confirmed" ? (task.needs_confirmation ? `Правки ждут подтверждения · опубликовано ${task.confirmed_score}/100` : `В каталоге · ${task.confirmed_score}/100`) : `Черновик · возможные ${task.preview_score}/100`),
         el("span", "", `${task.proposal_count} откл.`));
       const actions = el("div", "workspace-actions-row");
       const edit = el("button", "secondary-button", "Редактировать"); edit.type = "button";
@@ -265,7 +266,7 @@ $("seed-button").addEventListener("click", async () => {
 });
 
 async function openTask(id) {
-  selectedCatalogTask = await request(`/api/tasks/${id}`);
+  selectedCatalogTask = await request(`/api/tasks/${id}?published=1`);
   const task = selectedCatalogTask;
   const detail = $("task-detail"); detail.replaceChildren(); detail.hidden = false;
   detail.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || "Черновик задачи"),
