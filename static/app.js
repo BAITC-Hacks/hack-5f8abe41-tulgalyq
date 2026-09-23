@@ -337,11 +337,6 @@ async function addProgress(card, proposalId) {
   card.append(form);
 }
 
-const telegram = window.Telegram?.WebApp;
-if (telegram?.initData) {
-  document.body.classList.add("telegram-app");
-  telegram.ready(); telegram.expand();
-}
 request("/api/health").then(status => {
   $("ai-questions-button").disabled = !status.ai_enabled;
   if (!status.ai_enabled) $("ai-questions-button").title = "Для AI нужен OPENAI_API_KEY на сервере";
