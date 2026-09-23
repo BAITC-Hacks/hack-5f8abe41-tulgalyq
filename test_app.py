@@ -118,7 +118,8 @@ class AppTest(unittest.TestCase):
         self.assertEqual(unchanged["status"], "confirmed")
         _, team = self.api("/api/teams", "POST", {"name": "Тестовая команда", "skills": "Дизайн"})
         _, proposal = self.api("/api/proposals", "POST", {"task_id": task_id, "team_id": team["id"],
-            "idea": "Предзаказ через телефон", "plan": "Сделать прототип и тест"})
+            "idea": "Предзаказ через телефон", "plan": "Сделать прототип и тест",
+            "prototype_url": "https://example.org/demo/predzakaz"})
         proposal_id = proposal["id"]
         self.assertEqual(len(self.api(f"/api/proposals?task_id={task_id}")[1]), 1)
         self.assertEqual(self.api(f"/api/proposals/{proposal_id}/progress", "POST", {"description": "Готов первый прототип"})[0], 400)
@@ -146,7 +147,8 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.api("/api/tasks")[1][0]["fields"]["data"], "")
         self.assertEqual(self.api(f"/api/tasks/{task_id}")[1]["fields"]["data"], "Анонимные времена заказов")
         self.assertEqual(self.api("/api/proposals", "POST", {"task_id": task_id, "team_id": team["id"],
-            "idea": "Ещё один вариант предзаказа", "plan": "Изучить очередь и проверить прототип"})[0], 201)
+            "idea": "Ещё один вариант предзаказа", "plan": "Изучить очередь и проверить прототип",
+            "prototype_url": "https://example.org/demo/variant"})[0], 201)
         _, republished = self.api(f"/api/tasks/{task_id}/confirm", "POST")
         self.assertFalse(republished["needs_confirmation"])
         self.assertEqual(republished["confirmed_score"], 30)
@@ -197,7 +199,8 @@ class AppTest(unittest.TestCase):
         for name in ("Исследователи", "Разработчики"):
             _, team = self.api("/api/teams", "POST", {"name": name, "skills": "Дизайн"})
             _, proposal = self.api("/api/proposals", "POST", {"task_id": task["id"], "team_id": team["id"],
-                "idea": "Сделаем удобный каталог кружков", "plan": "Изучим потребности и соберём прототип"})
+                "idea": "Сделаем удобный каталог кружков", "plan": "Изучим потребности и соберём прототип",
+                "prototype_url": "https://example.org/demo/kruzhki"})
             proposals.append(proposal["id"])
         self.assertEqual({p["status"] for p in self.api("/api/proposals")[1]}, {"pending"})
         for proposal_id in proposals:
@@ -218,6 +221,20 @@ class AppTest(unittest.TestCase):
                              (69, "medium"), (70, "high"), (89, "high"),
                              (90, "priority"), (100, "priority")]:
             self.assertEqual(app.readiness_level(score), level)
+
+    def test_empty_data_and_vague_success_do_not_earn_points(self):
+        for field, answer in (
+            ("data", "Данных пока нет"),
+            ("need", "Сделать лучше"),
+            ("expected_result", "Хороший результат"),
+            ("success_criteria", "Мы будем довольны"),
+            ("interaction_format", "Будем на связи"),
+        ):
+            with self.subTest(field=field):
+                self.assertIsNotNone(app.quality_issue(field, answer))
+                self.assertEqual(app.score_fields({field: answer})[0], 0)
+        self.assertIsNone(app.quality_issue("success_criteria", "Среднее ожидание ниже 7 минут"))
+        self.assertEqual(app.score_fields({"success_criteria": "Среднее ожидание ниже 7 минут"})[0], 15)
 
     def test_zero_point_card_requires_confirmation_but_stays_visible(self):
         description = "Нужно сократить очередь в школьной столовой"
@@ -253,7 +270,8 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.api("/api/tasks?readiness=low")[1][0]["id"], task_id)
         _, team = self.api("/api/teams", "POST", {"name": "Команда уточнения"})
         self.assertEqual(self.api("/api/proposals", "POST", {"task_id": task_id, "team_id": team["id"],
-            "idea": "Уточним проблему очереди", "plan": "Обсудим условия и предложим прототип"})[0], 201)
+            "idea": "Уточним проблему очереди", "plan": "Обсудим условия и предложим прототип",
+            "prototype_url": "https://example.org/demo/queue"})[0], 201)
         _, corrected = self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {
             "title": "Уменьшить очередь в столовой", "need": "Сократить время ожидания обеда",
             "data": "Обезличенные замеры времени ожидания", "contact": "@schoolteam",
@@ -498,6 +516,7 @@ class AppTest(unittest.TestCase):
         _, team = self.api("/api/teams", "POST", {"name": "Проверка адресов"})
         payload = {"task_id": task["id"], "team_id": team["id"],
                    "idea": "Электронный предзаказ", "plan": "Измерить очередь и собрать прототип"}
+        self.assertEqual(self.api("/api/proposals", "POST", payload)[0], 400)
         for url in ("https://", "http://", "http://[ошибка", "javascript:alert(1)"):
             self.assertEqual(self.api("/api/proposals", "POST", {**payload, "prototype_url": url})[0], 400)
         self.assertEqual(self.api("/api/proposals", "POST", {**payload, "prototype_url": "https://example.org/demo"})[0], 201)

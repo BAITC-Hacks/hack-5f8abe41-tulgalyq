@@ -37,7 +37,7 @@ def load_local_env():
 
 
 load_local_env()
-DB_PATH = Path(os.getenv("MISSION100_DB_PATH", str(ROOT / "data" / "mission100.sqlite3")))
+DB_PATH = Path(os.getenv("MISSION100_DB_PATH", str(ROOT / "data" / "tulgalyq-demo.sqlite3")))
 FIELDS = (
     "title", "context", "need", "users", "data", "constraints",
     "expected_result", "success_criteria", "contact", "interaction_format",
@@ -170,6 +170,16 @@ def clean_text(value, max_length=4000):
 PLACEHOLDERS = {"тест", "test", "нет", "незнаю", "потом", "заполнить", "xxx", "asdf", "qwerty", "йцукен",
                 "нетданных", "данныхнет", "поканет", "незнаюпока"}
 KEYBOARD_MASHES = ("asdfghjkl", "qwertyuiop", "zxcvbnm", "йцукенгшщз", "фывапролджэ", "ячсмитьбю")
+VAGUE_BY_FIELD = {
+    "data": {"данныхпоканет", "поканетданных", "данныеотсутствуют", "нетматериалов", "материаловпоканет", "данныеесть"},
+    "need": {"сделатьлучше", "улучшитьвсё", "улучшитьвсе"},
+    "expected_result": {"чтотополезное", "хорошийрезультат"},
+    "interaction_format": {"будемнасвязи", "онлайн", "офлайн"},
+}
+MEASURABLE_HINT = re.compile(
+    r"\d|%|время|минут|час|дол[яи]|количеств|числ|процент|ошиб|пропуск|сценари|"
+    r"сократ|сниз|увелич|меньше|больше|не менее|не более|сравнен|измер|тест", re.IGNORECASE
+)
 
 
 def valid_http_url(value):
@@ -191,6 +201,10 @@ def quality_issue(name, value):
             or any(len(compact) >= 6 and compact in row for row in KEYBOARD_MASHES)
             or (len(tokens) > 1 and len(set(tokens)) == 1)):
         return "Замените заглушку или повторы конкретными сведениями."
+    if compact in VAGUE_BY_FIELD.get(name, ()):
+        return "Укажите конкретные сведения для этого поля; общая фраза не повышает рейтинг."
+    if name == "success_criteria" and not MEASURABLE_HINT.search(text):
+        return "Назовите измеримый признак успеха: время, количество, долю, число ошибок или результат проверки."
     if name == "contact":
         has_email = bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text))
         has_handle = bool(re.fullmatch(r"@[\w.]{4,}", text, re.UNICODE))
@@ -794,8 +808,8 @@ class Handler(BaseHTTPRequestHandler):
                 url = clean_text(data.get("prototype_url", ""), 500)
                 if len(idea) < 10 or len(plan) < 10:
                     raise ValueError("Опишите идею и план хотя бы одним предложением.")
-                if url and not valid_http_url(url):
-                    raise ValueError("Укажите действительный адрес прототипа с http:// или https://.")
+                if not valid_http_url(url):
+                    raise ValueError("Укажите ссылку на прототип с http:// или https://.")
                 task = get_task(task_id)
                 if not task or task["status"] != "confirmed":
                     return self.json_response(404, {"error": "Опубликованная задача не найдена."})

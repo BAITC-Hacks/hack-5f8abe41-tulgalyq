@@ -19,6 +19,13 @@ const IMPROVEMENT_QUESTIONS = {
 };
 const PLACEHOLDERS = new Set(["тест","test","нет","незнаю","потом","заполнить","xxx","asdf","qwerty","йцукен","нетданных","данныхнет","поканет","незнаюпока"]);
 const KEYBOARD_MASHES = ["asdfghjkl","qwertyuiop","zxcvbnm","йцукенгшщз","фывапролджэ","ячсмитьбю"];
+const VAGUE_BY_FIELD = {
+  data:new Set(["данныхпоканет","поканетданных","данныеотсутствуют","нетматериалов","материаловпоканет","данныеесть"]),
+  need:new Set(["сделатьлучше","улучшитьвсё","улучшитьвсе"]),
+  expected_result:new Set(["чтотополезное","хорошийрезультат"]),
+  interaction_format:new Set(["будемнасвязи","онлайн","офлайн"])
+};
+const MEASURABLE_HINT = /\d|%|время|минут|час|дол[яи]|количеств|числ|процент|ошиб|пропуск|сценари|сократ|сниз|увелич|меньше|больше|не менее|не более|сравнен|измер|тест/i;
 const READINESS_LABELS = {low:"Черновик · требует уточнения",medium:"Рабочая",high:"Готовая",priority:"Приоритетная"};
 let currentTask = null;
 let selectedCatalogTask = null;
@@ -72,6 +79,8 @@ function qualityIssue(name, value) {
   if (compact.length < 4 || PLACEHOLDERS.has(compact) || new Set(compact).size === 1 ||
       KEYBOARD_MASHES.some(row => compact.length >= 6 && row.includes(compact)) ||
       (tokens.length > 1 && new Set(tokens).size === 1)) return "Замените заглушку или повторы конкретными сведениями.";
+  if (VAGUE_BY_FIELD[name]?.has(compact)) return "Укажите конкретные сведения для этого поля; общая фраза не повышает рейтинг.";
+  if (name === "success_criteria" && !MEASURABLE_HINT.test(text)) return "Назовите измеримый признак успеха: время, количество, долю, число ошибок или результат проверки.";
   if (name === "contact") {
     const hasEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text);
     const hasHandle = /^@[\p{L}\p{N}_.]{4,}$/u.test(text);
@@ -576,7 +585,7 @@ async function openTask(id) {
   const idea = el("textarea"); idea.placeholder = "Идея решения (обязательно)"; idea.required = true; idea.minLength = 10;
   const plan = el("textarea"); plan.placeholder = "План работы (обязательно)"; plan.required = true; plan.minLength = 10;
   const deadline = el("input"); deadline.placeholder = "Срок выполнения (например, 2 недели)"; deadline.maxLength = 120;
-  const link = el("input"); link.placeholder = "Ссылка на прототип (необязательно)"; link.type = "url";
+  const link = el("input"); link.placeholder = "Ссылка на прототип (обязательно)"; link.type = "url"; link.required = true;
   for (const input of [teamName, teamSkills, teamInterests, teamTechnologies, idea, plan, deadline, link]) {
     input.setAttribute("aria-label", input.placeholder);
   }
