@@ -57,9 +57,12 @@ class AppTest(unittest.TestCase):
         self.assertIn('id="mobile-menu-toggle"', page)
         self.assertIn('id="theme-toggle"', page)
         self.assertIn('id="primary-nav"', page)
+        self.assertIn('id="catalog-search"', page)
+        self.assertIn('id="catalog-reset"', page)
         self.assertIn('id="score-details"', page)
         self.assertIn('.score-panel summary', mobile_css)
         self.assertIn('html[data-theme="dark"]', theme_css)
+        self.assertIn('grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr)', theme_css)
         self.assertIn('.menu-open .sidebar nav', theme_css)
 
     def test_full_flow_and_publication_boundary(self):

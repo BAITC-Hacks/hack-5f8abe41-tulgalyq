@@ -45,16 +45,17 @@ body {
   z-index: 50;
   height: 72px;
   padding: 0 clamp(18px, 3vw, 48px);
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 25px;
+  gap: 12px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink);
 }
 .brand {
   flex: 0 0 auto;
+  justify-self: start;
   padding: 0;
   color: var(--ink);
   font-size: 19px;
@@ -75,26 +76,29 @@ body {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  gap: clamp(4px, 1vw, 16px);
+  gap: clamp(4px, .9vw, 14px);
   height: 100%;
-  margin-left: auto;
+  margin: 0;
+  justify-self: center;
 }
 .nav-link {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 0 10px;
+  min-height: 48px;
+  padding: 0 12px;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
 }
-.nav-link span { width: auto; font-size: 15px; }
+.nav-link span { display: none; }
 .nav-link small { display: none; }
-.nav-link:hover { color: var(--ink); }
+.nav-link:hover { color: var(--ink); background: var(--surface-soft); }
 .nav-link.active { border-bottom-color: var(--accent); background: transparent; color: var(--ink); }
-.header-actions { display: flex; align-items: center; gap: 7px; }
+.header-actions { display: flex; align-items: center; justify-self: end; gap: 7px; }
+.mobile-menu-head { display: none; }
 .theme-toggle, .mobile-menu-toggle, .mobile-menu-close {
   display: grid;
   place-items: center;
@@ -111,6 +115,15 @@ body {
 .theme-toggle:hover, .mobile-menu-toggle:hover, .mobile-menu-close:hover { background: var(--surface-soft); }
 .mobile-menu-toggle, .mobile-menu-close { display: none; }
 .menu-backdrop { display: none; }
+
+.catalog-tools { display: grid; gap: 13px; margin: 18px 0 24px; }
+.catalog-search-label { max-width: 520px; margin: 0; }
+.catalog-search-label input { display: block; width: 100%; min-height: 48px; margin-top: 8px; padding: 11px 14px; font-size: 14px; letter-spacing: 0; }
+.catalog-filters { margin: 0; }
+.catalog-filters button { min-height: 42px; }
+.catalog-filters #catalog-reset { border-color: transparent; background: transparent; color: var(--accent); }
+.catalog-filters #catalog-reset:hover { background: var(--accent-soft); }
+.catalog-count { margin: 0 0 14px; color: var(--muted); font-size: 12px; font-weight: 700; }
 
 .content { max-width: 1160px; padding: 48px 34px 85px; }
 .hero {
@@ -207,9 +220,12 @@ html[data-theme="dark"] .primary-button:hover { color: #21191a; }
 }
 
 @media (max-width: 850px) {
-  .sidebar { gap: 10px; }
+  .sidebar { gap: 7px; }
+  .brand { gap: 7px; font-size: 16px; }
+  .brand-symbol { width: 30px; height: 30px; }
   .nav-link { padding: 0 5px; font-size: 11px; }
-  .nav-link span { display: none; }
+  .sidebar nav { gap: 3px; }
+  .theme-toggle { width: 40px; height: 40px; }
 }
 
 @media (max-width: 700px) {
@@ -240,7 +256,7 @@ html[data-theme="dark"] .primary-button:hover { color: #21191a; }
     transition: transform .22s ease, visibility .22s;
   }
   .menu-open .sidebar nav { visibility: visible; transform: translateX(0); }
-  .mobile-menu-close { align-self: flex-end; margin-bottom: 20px; }
+  .mobile-menu-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; color: var(--ink); font-size: 17px; }
   .nav-link { min-height: 48px; padding: 0 15px; border: 0; border-radius: 9px; font-size: 14px; }
   .nav-link span { display: inline; font-size: 19px; }
   .nav-link.active { background: var(--accent-soft); color: var(--accent); }
@@ -256,6 +272,10 @@ html[data-theme="dark"] .primary-button:hover { color: #21191a; }
     background: rgba(0, 0, 0, .55);
   }
   .content { padding: 18px 16px 60px; }
+  .catalog-tools { margin: 15px 0 20px; }
+  .catalog-search-label { max-width: none; }
+  .catalog-filters { margin: 0; }
+  .catalog-filters #catalog-reset { grid-column: 1 / -1; }
   .hero { min-height: 0; background-color: var(--surface); }
   .hero-copy { padding: 28px 24px; }
   .hero h1 { font-size: clamp(30px, 8vw, 39px); }

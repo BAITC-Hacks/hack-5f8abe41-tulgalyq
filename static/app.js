@@ -23,6 +23,8 @@ let currentTask = null;
 let selectedCatalogTask = null;
 let proposalTaskFilterValue = "";
 let pendingQuestionAnswers = {};
+let catalogTasks = [];
+let catalogRequestId = 0;
 const $ = (id) => document.getElementById(id);
 const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value !== undefined) node.textContent = value; return node; };
 
@@ -314,28 +316,45 @@ $("new-task-button").addEventListener("click", () => {
 });
 
 async function loadCatalog() {
+  const requestId = ++catalogRequestId;
   try {
     const topic = encodeURIComponent($("catalog-topic").value);
     const sort = encodeURIComponent($("catalog-sort").value);
     const readiness = encodeURIComponent($("catalog-readiness").value);
     const tasks = await request(`/api/tasks?topic=${topic}&sort=${sort}&readiness=${readiness}`);
-    const list = $("catalog-list"); list.replaceChildren();
-    if (!tasks.length) list.append(el("p", "empty-state", "Задач пока нет. Создайте первую или добавьте демо-данные."));
-    tasks.forEach(task => {
-      const card = el("article", "catalog-card");
-      card.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || task.raw_description),
-        el("p", "", task.fields.need || task.raw_description));
-      const nextField = Object.keys(WEIGHTS).filter(name => task.missing.includes(name)).sort((a,b) => WEIGHTS[b] - WEIGHTS[a])[0];
-      if (task.rating_needs_review) card.append(el("div", "catalog-next", "Рейтинг ждёт перепроверки бизнесом"));
-      else if (nextField) card.append(el("div", "catalog-next", `Что уточнить: ${FIELD_LABELS[nextField]} · до +${WEIGHTS[nextField]}`));
-      const footer = el("div", "catalog-footer");
-      footer.append(el("span", `rating-chip rating-${task.readiness_level}`, `${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]}${task.rating_needs_review ? " · перепроверка" : ""}`),
-        el("span", "", `${task.proposal_count} откл.`));
-      const button = el("button", "secondary-button", "Открыть →"); button.type = "button";
-      button.addEventListener("click", () => openTask(task.id)); footer.append(button);
-      card.append(footer); list.append(card);
-    });
-  } catch (error) { $("catalog-list").textContent = error.message; }
+    if (requestId !== catalogRequestId) return;
+    catalogTasks = tasks;
+    renderCatalog();
+  } catch (error) {
+    if (requestId === catalogRequestId) $("catalog-list").textContent = error.message;
+  }
+}
+function renderCatalog() {
+  const query = $("catalog-search").value.trim().toLocaleLowerCase("ru");
+  const tasks = catalogTasks.filter(task => !query || [task.topic, task.fields.title, task.fields.need, task.raw_description]
+    .some(value => (value || "").toLocaleLowerCase("ru").includes(query)));
+  $("catalog-count").textContent = query ? `Найдено: ${tasks.length} из ${catalogTasks.length}` : `В каталоге: ${tasks.length}`;
+  const list = $("catalog-list"); list.replaceChildren();
+  if (!tasks.length) {
+    const filtered = query || $("catalog-topic").value || $("catalog-readiness").value;
+    list.append(el("p", "empty-state", filtered
+      ? "По этому запросу миссий нет. Попробуйте другое слово или сбросьте фильтры."
+      : "Задач пока нет. Создайте первую или добавьте демо-данные."));
+  }
+  tasks.forEach(task => {
+    const card = el("article", "catalog-card");
+    card.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || task.raw_description),
+      el("p", "", task.fields.need || task.raw_description));
+    const nextField = Object.keys(WEIGHTS).filter(name => task.missing.includes(name)).sort((a,b) => WEIGHTS[b] - WEIGHTS[a])[0];
+    if (task.rating_needs_review) card.append(el("div", "catalog-next", "Рейтинг ждёт перепроверки бизнесом"));
+    else if (nextField) card.append(el("div", "catalog-next", `Что уточнить: ${FIELD_LABELS[nextField]} · до +${WEIGHTS[nextField]}`));
+    const footer = el("div", "catalog-footer");
+    footer.append(el("span", `rating-chip rating-${task.readiness_level}`, `${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]}${task.rating_needs_review ? " · перепроверка" : ""}`),
+      el("span", "", `${task.proposal_count} откл.`));
+    const button = el("button", "secondary-button", "Открыть →"); button.type = "button";
+    button.addEventListener("click", () => openTask(task.id)); footer.append(button);
+    card.append(footer); list.append(card);
+  });
 }
 async function loadRecommendations() {
   const select = $("recommendation-team");
@@ -366,6 +385,15 @@ $("recommendation-team").addEventListener("change", loadRecommendations);
 $("catalog-topic").addEventListener("change", loadCatalog);
 $("catalog-readiness").addEventListener("change", loadCatalog);
 $("catalog-sort").addEventListener("change", loadCatalog);
+$("catalog-search").addEventListener("input", renderCatalog);
+$("catalog-reset").addEventListener("click", () => {
+  $("catalog-search").value = "";
+  $("catalog-topic").value = "";
+  $("catalog-readiness").value = "";
+  $("catalog-sort").value = "rating";
+  loadCatalog();
+  $("catalog-search").focus();
+});
 $("seed-button").addEventListener("click", async () => {
   try {
     const result = await request("/api/demo/seed", {method:"POST", body:"{}"});
