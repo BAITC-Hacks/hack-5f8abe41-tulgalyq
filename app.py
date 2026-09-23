@@ -586,6 +586,27 @@ def list_proposals(task_id=None):
     return [dict(row) for row in rows]
 
 
+def seed_demo_comparison(db):
+    """Add distinct proposals to one synthetic task so the manual choice is demonstrable."""
+    if not db.execute("SELECT 1 FROM tasks WHERE id = 'demo-card-1'").fetchone():
+        return 0
+    alternatives = (
+        ("demo-proposal-compare-2", "demo-team-2", "Сделаем карту кружков с фильтрами по возрасту, времени и месту.",
+         "Соберём запросы семей, покажем прототип поиска и проверим его на сценариях.", "3 недели", "https://example.org/demo/clubs-map"),
+        ("demo-proposal-compare-3", "demo-team-3", "Предложим чат-помощник для подбора кружка по интересам ребёнка.",
+         "Подготовим дерево вопросов, прототип диалога и тест с родителями.", "2 недели", "https://example.org/demo/clubs-chat"),
+    )
+    added = 0
+    for proposal_id, team_id, idea, plan, deadline, url in alternatives:
+        if not db.execute("SELECT 1 FROM teams WHERE id = ?", (team_id,)).fetchone():
+            continue
+        added += db.execute("""INSERT OR IGNORE INTO proposals
+            (id, task_id, team_id, idea, plan, deadline, prototype_url)
+            VALUES (?, 'demo-card-1', ?, ?, ?, ?, ?)""",
+            (proposal_id, team_id, idea, plan, deadline, url)).rowcount
+    return added
+
+
 def seed_demo():
     examples = [
         ("Образование", "Школьникам сложно найти подходящие кружки после уроков.", "Навигатор школьных кружков", "Школа ведёт расписания в разных таблицах.", "Помочь семьям быстро найти подходящий кружок.", "Ученики и родители", "Расписание кружков без персональных данных", "Запуск в одной школе", "Рабочий каталог с записью", "20 тестовых записей", "demo@school.kz", "Онлайн, раз в неделю"),
@@ -596,7 +617,7 @@ def seed_demo():
     ]
     with DB_LOCK, connect() as db:
         if db.execute("SELECT 1 FROM tasks WHERE id = 'demo-card-1'").fetchone():
-            return False
+            return False, seed_demo_comparison(db)
         for index, (topic, raw, *values) in enumerate(examples):
             complete_fields: dict[str, str] = dict(zip(FIELDS, values))
             fields: dict[str, str] = complete_fields.copy()
@@ -627,7 +648,7 @@ def seed_demo():
             db.execute("INSERT INTO proposals (id, task_id, team_id, idea, plan, deadline, prototype_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
                        (f"demo-proposal-{index + 1}", task_id, team_id, f"Сделаем прототип для задачи «{fields['title']}».",
                         "Исследование → прототип → тестирование", "2 недели", f"https://example.org/demo/{index + 1}"))
-    return True
+        return True, seed_demo_comparison(db)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -727,8 +748,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             data = self.read_json()
             if path == "/api/demo/seed":
-                created = seed_demo()
-                return self.json_response(200, {"created": created, "tasks": len(list_tasks())})
+                created, comparison_added = seed_demo()
+                return self.json_response(200, {"created": created, "comparison_added": comparison_added,
+                                                "tasks": len(list_tasks())})
             if path.startswith("/api/tasks/") and path.endswith("/ai-questions"):
                 task_id = path.split("/")[3]
                 task = get_task(task_id)

@@ -67,7 +67,7 @@ $("primary-nav").querySelectorAll("a").forEach(link => link.addEventListener("cl
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && document.body.classList.contains("menu-open")) setMenuOpen(false, true);
 });
-window.matchMedia("(min-width: 701px)").addEventListener("change", event => {
+window.matchMedia("(min-width: 901px)").addEventListener("change", event => {
   if (event.matches) setMenuOpen(false);
 });
 
@@ -348,7 +348,7 @@ $("back-to-draft").addEventListener("click", startNewTask);
 })();
 
 function showView(view) {
-  for (const name of ["constructor", "workspace", "catalog", "proposals"]) {
+  for (const name of ["constructor", "workspace", "rating", "catalog", "proposals"]) {
     $(name+"-view").hidden = name !== view;
     const link = document.querySelector(`[data-view="${name}"]`);
     link.classList.toggle("active", name === view);
@@ -364,14 +364,15 @@ function showView(view) {
   $("notice").hidden = true;
   $("task-detail").hidden = true;
   if (view !== "workspace") $("publish-success").hidden = true;
-  $("current-view-label").textContent = {constructor:"Конструктор задачи",workspace:"Задачи бизнеса",catalog:"Каталог задач",proposals:"Отклики команд"}[view];
+  $("current-view-label").textContent = {constructor:"Конструктор задачи",workspace:"Задачи бизнеса",rating:"Рейтинг задач",catalog:"Каталог задач",proposals:"Выбор команд"}[view];
   if (view === "workspace") loadWorkspace();
+  if (view === "rating") loadRating();
   if (view === "catalog") { loadCatalog(); loadRecommendations(); }
   if (view === "proposals") loadProposals();
   window.scrollTo(0, 0);
 }
-window.addEventListener("hashchange", () => showView(["workspace", "catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor"));
-showView(["workspace", "catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor");
+window.addEventListener("hashchange", () => showView(["workspace", "rating", "catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor"));
+showView(["workspace", "rating", "catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor");
 const scoreBreakpoint = window.matchMedia("(max-width: 700px)");
 function syncScoreDetails(event) {
   $("score-details").open = !event.matches;
@@ -422,6 +423,81 @@ async function loadWorkspace() {
     });
   } catch (error) { $("workspace-list").textContent = error.message; }
 }
+
+const ratingWeights = $("rating-weights");
+Object.entries(WEIGHTS).forEach(([field, weight]) => {
+  const row = el("div", "rating-weight");
+  row.append(el("span", "", FIELD_LABELS[field]), el("b", "", `${weight} баллов`));
+  ratingWeights.append(row);
+});
+let ratedTasks = [];
+async function loadRating() {
+  try {
+    ratedTasks = await request("/api/tasks?sort=rating");
+    renderRating();
+  } catch (error) {
+    $("rating-summary").textContent = "Не удалось загрузить рейтинг.";
+    $("rating-list").textContent = error.message;
+  }
+}
+function renderRating() {
+  const readiness = $("rating-readiness").value;
+  const tasks = ratedTasks.filter(task => !readiness || task.readiness_level === readiness);
+  $("rating-summary").textContent = `Опубликовано: ${ratedTasks.length} · показано: ${tasks.length}`;
+  const list = $("rating-list"); list.replaceChildren();
+  if (!tasks.length) {
+    list.append(el("p", "empty-state", ratedTasks.length
+      ? "На этом уровне задач пока нет. Выберите другой уровень."
+      : "Подтверждённых задач пока нет. Создайте и опубликуйте первую."));
+  }
+  tasks.forEach((task, index) => {
+    const card = el("article", "rating-card stage-card");
+    const heading = el("div", "rating-card-heading");
+    const title = el("div", "rating-card-title");
+    title.append(el("span", "step-tag", `${index + 1}. ${task.topic}`),
+      el("h2", "", task.quality_issues.title ? task.raw_description : (task.fields.title || task.raw_description)));
+    const score = el("div", "rating-score");
+    score.append(el("strong", "", `${task.confirmed_score}`), el("span", "", "/ 100"));
+    heading.append(title, score);
+    const meter = document.createElement("progress"); meter.max = 100; meter.value = task.confirmed_score;
+    meter.setAttribute("aria-label", `Готовность задачи: ${task.confirmed_score} из 100`);
+    card.append(heading, meter, el("p", "rating-level", READINESS_LABELS[task.readiness_level]));
+    if (task.rating_needs_review) card.append(el("p", "rating-warning", "Опубликованный балл рассчитан по прежним правилам. Бизнесу нужно повторно подтвердить карточку."));
+
+    const breakdown = el("details", "rating-breakdown");
+    breakdown.append(el("summary", "", task.rating_needs_review
+      ? "Предварительная разбивка по новым правилам" : "За что начислены баллы"));
+    Object.entries(WEIGHTS).forEach(([field, weight]) => {
+      const earned = task.earned[field] || 0;
+      const row = el("div", `rating-breakdown-row${earned ? "" : " missing"}`);
+      row.append(el("span", "", FIELD_LABELS[field]), el("b", "", `${earned}/${weight}`));
+      breakdown.append(row);
+    });
+    card.append(breakdown);
+    const missing = Object.entries(WEIGHTS).filter(([field]) => task.missing.includes(field));
+    const gapDetails = el("details", "rating-gaps");
+    gapDetails.append(el("summary", "", missing.length
+      ? `Что уточнить: ${missing.length} · до +${missing.reduce((sum, [, weight]) => sum + weight, 0)} баллов`
+      : "Все поля рейтинга заполнены"));
+    if (missing.length) {
+      const gaps = el("ul", "");
+      missing.forEach(([field, weight]) => gaps.append(el("li", "", `${FIELD_LABELS[field]} · +${weight}: ${IMPROVEMENT_QUESTIONS[field]}`)));
+      gapDetails.append(gaps);
+    }
+    card.append(gapDetails);
+    const actions = el("div", "rating-actions");
+    const edit = el("button", "secondary-button", "Улучшить задачу"); edit.type = "button";
+    edit.addEventListener("click", () => openEditor(task.id));
+    const catalog = el("button", "primary-button", "Открыть в каталоге →"); catalog.type = "button";
+    catalog.addEventListener("click", async () => {
+      location.hash = "catalog";
+      try { await openTask(task.id); } catch (error) { $("catalog-list").textContent = error.message; }
+    });
+    actions.append(edit, catalog); card.append(actions); list.append(card);
+  });
+}
+$("rating-readiness").addEventListener("change", renderRating);
+
 async function openEditor(id, questions=false) {
   try {
     pendingQuestionAnswers = {};
@@ -517,7 +593,9 @@ $("seed-button").addEventListener("click", async () => {
   try {
     const result = await request("/api/demo/seed", {method:"POST", body:"{}"});
     await loadCatalog(); await loadRecommendations();
-    alert(result.created ? "Добавлены 5 синтетических карточек, 5 черновиков, 5 команд и 5 откликов." : "В базе уже есть задачи — демо-данные не добавлены.");
+    alert(result.created ? "Добавлены 5 синтетических карточек, 5 черновиков, 5 команд и 7 откликов. Для первой задачи можно сравнить три предложения." :
+      result.comparison_added ? "К демо-задаче добавлены два разных предложения для сравнения команд." :
+      "Демо-данные уже добавлены; повторно они не создаются.");
   } catch (error) { alert(error.message); }
 });
 
@@ -629,11 +707,24 @@ async function loadProposals() {
     taskFilter.value = previousTask;
     proposalTaskFilterValue = taskFilter.value;
     const status = $("proposal-status-filter").value;
+    const taskProposals = allProposals.filter(proposal => !proposalTaskFilterValue || proposal.task_id === proposalTaskFilterValue);
     const proposals = allProposals.filter(proposal =>
       (!proposalTaskFilterValue || proposal.task_id === proposalTaskFilterValue) && (!status || proposal.status === status));
+    const summary = $("proposal-summary"); summary.replaceChildren();
+    for (const [label, count] of [
+      ["Всего откликов", taskProposals.length],
+      ["Ожидают решения", taskProposals.filter(item => item.status === "pending").length],
+      ["Выбраны", taskProposals.filter(item => item.status === "selected").length],
+      ["Отклонены", taskProposals.filter(item => item.status === "rejected").length],
+    ]) {
+      const item = el("div", "proposal-stat");
+      item.append(el("b", "", String(count)), el("span", "", label)); summary.append(item);
+    }
+    if (!proposalTaskFilterValue) summary.append(el("p", "proposal-tip", "Выберите задачу выше, чтобы сравнить её предложения рядом."));
     const taskById = new Map(tasks.map(task => [task.id, task]));
     const leaderboard = $("leaderboard"); leaderboard.replaceChildren();
-    leaderboard.append(el("strong", "", "Прогресс команд"));
+    leaderboard.append(el("strong", "", "Баллы команд за подтверждённые этапы"));
+    if (!teams.length) leaderboard.append(el("span", "", "Команд пока нет."));
     teams.forEach((team, index) => {
       const row = el("div", "leader-row", `${index + 1}. ${team.name}`);
       row.append(el("b", "", `${team.points} баллов`)); leaderboard.append(row);
@@ -659,9 +750,16 @@ async function loadProposals() {
       const actions = el("div", "actions");
       for (const [decision, label] of [["selected","Выбрать"],["rejected","Отклонить"],["pending","Сбросить решение"]]) {
         const button = el("button", decision === "selected" ? "primary-button" : "secondary-button", label);
+        button.type = "button";
+        button.disabled = proposal.status === decision;
         button.addEventListener("click", async () => {
-          await request(`/api/proposals/${proposal.id}/decision`, {method:"POST", body:JSON.stringify({decision})});
-          await loadProposals();
+          button.disabled = true;
+          try {
+            await request(`/api/proposals/${proposal.id}/decision`, {method:"POST", body:JSON.stringify({decision})});
+            await loadProposals();
+            showProposalNotice(decision === "selected" ? "Команда выбрана вручную. Можно выбрать и другие команды." :
+              decision === "rejected" ? "Предложение отклонено." : "Предложение снова ожидает решения.");
+          } catch (error) { showProposalNotice(error.message, true); button.disabled = false; }
         }); actions.append(button);
       }
       card.append(actions);
@@ -669,6 +767,10 @@ async function loadProposals() {
       list.append(card);
     }
   } catch (error) { $("proposals-list").textContent = error.message; }
+}
+function showProposalNotice(message, error=false) {
+  const notice = $("proposal-notice");
+  notice.textContent = message; notice.classList.toggle("error", error); notice.hidden = false;
 }
 $("proposal-task-filter").addEventListener("change", () => { proposalTaskFilterValue = $("proposal-task-filter").value; loadProposals(); });
 $("proposal-status-filter").addEventListener("change", loadProposals);
@@ -680,7 +782,14 @@ async function addProgress(card, proposalId) {
     row.append(el("span", "", `${item.description} · ${item.status === "confirmed" ? "+10 баллов" : "ожидает подтверждения"}`));
     if (item.status === "pending") {
       const button = el("button", "secondary-button", "Подтвердить этап");
-      button.addEventListener("click", async () => { await request(`/api/progress/${item.id}/confirm`, {method:"POST",body:"{}"}); await loadProposals(); });
+      button.type = "button";
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await request(`/api/progress/${item.id}/confirm`, {method:"POST",body:"{}"});
+          await loadProposals(); showProposalNotice("Этап подтверждён: команде начислено 10 баллов.");
+        } catch (error) { showProposalNotice(error.message, true); button.disabled = false; }
+      });
       row.append(button);
     }
     card.append(row);
@@ -690,8 +799,11 @@ async function addProgress(card, proposalId) {
   const button = el("button", "secondary-button", "Отправить этап"); form.append(input,button);
   form.addEventListener("submit", async event => {
     event.preventDefault();
-    try { await request(`/api/proposals/${proposalId}/progress`, {method:"POST", body:JSON.stringify({description:input.value})}); await loadProposals(); }
-    catch (error) { alert(error.message); }
+    button.disabled = true;
+    try {
+      await request(`/api/proposals/${proposalId}/progress`, {method:"POST", body:JSON.stringify({description:input.value})});
+      await loadProposals(); showProposalNotice("Этап отправлен. Баллы появятся только после подтверждения.");
+    } catch (error) { showProposalNotice(error.message, true); button.disabled = false; }
   });
   card.append(form);
 }

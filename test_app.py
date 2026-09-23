@@ -92,6 +92,10 @@ class AppTest(unittest.TestCase):
         self.assertIn('КОНСТРУКТОР БИЗНЕС-ЗАДАЧ · ШАГ 01 / 03', page)
         self.assertIn('Черновик · требует уточнения · 0–39', page)
         self.assertIn('id="catalog-reset"', page)
+        self.assertIn('id="rating-view"', page)
+        self.assertIn('id="rating-readiness"', page)
+        self.assertIn('id="proposal-summary"', page)
+        self.assertIn('id="proposals-list" class="proposal-compare-grid"', page)
         self.assertIn('id="score-details"', page)
         self.assertIn('.score-panel summary', mobile_css)
         self.assertIn('html[data-theme="dark"]', theme_css)
@@ -160,7 +164,10 @@ class AppTest(unittest.TestCase):
         _, result = self.api("/api/demo/seed", "POST")
         self.assertTrue(result["created"])
         self.assertEqual(result["tasks"], 5)
-        self.assertFalse(self.api("/api/demo/seed", "POST")[1]["created"])
+        self.assertEqual(result["comparison_added"], 2)
+        repeated = self.api("/api/demo/seed", "POST")[1]
+        self.assertFalse(repeated["created"])
+        self.assertEqual(repeated["comparison_added"], 0)
         ratings = [task["confirmed_score"] for task in self.api("/api/tasks?sort=rating")[1]]
         self.assertEqual(ratings, [task["confirmed_score"] for task in self.api("/api/tasks")[1]])
         self.assertEqual(len(ratings), 5)
@@ -176,7 +183,8 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(self.api("/api/tasks?readiness=high")[1]), 1)
         self.assertEqual(len(self.api("/api/tasks?readiness=priority")[1]), 2)
         self.assertEqual(len(self.api("/api/teams")[1]), 5)
-        self.assertEqual(len(self.api("/api/proposals")[1]), 5)
+        self.assertEqual(len(self.api("/api/proposals")[1]), 7)
+        self.assertEqual(len(self.api("/api/proposals?task_id=demo-card-1")[1]), 3)
         self.assertTrue(all(team["interests"] and team["technologies"] for team in self.api("/api/teams")[1]))
         self.assertTrue(all(item["deadline"] and item["prototype_url"] for item in self.api("/api/proposals")[1]))
         code, matches = self.api("/api/teams/demo-team-1/recommendations")
@@ -192,6 +200,16 @@ class AppTest(unittest.TestCase):
         self.assertEqual([task["preview_score"] for task in demo_drafts],
                          sorted({task["preview_score"] for task in demo_drafts}))
         self.assertTrue(all(task["topic"] for task in demo_drafts))
+
+    def test_existing_demo_can_gain_comparison_proposals_once(self):
+        self.api("/api/demo/seed", "POST")
+        with app.connect() as db:
+            db.execute("DELETE FROM proposals WHERE id LIKE 'demo-proposal-compare-%'")
+        _, result = self.api("/api/demo/seed", "POST")
+        self.assertFalse(result["created"])
+        self.assertEqual(result["comparison_added"], 2)
+        self.assertEqual(len(self.api("/api/proposals?task_id=demo-card-1")[1]), 3)
+        self.assertEqual(self.api("/api/demo/seed", "POST")[1]["comparison_added"], 0)
 
     def test_business_can_select_multiple_teams_without_auto_assignment(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Школьникам нужен удобный каталог кружков"})

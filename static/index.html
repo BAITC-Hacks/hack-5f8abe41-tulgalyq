@@ -25,8 +25,9 @@
         <div class="mobile-menu-head"><strong>Разделы</strong><button id="mobile-menu-close" class="mobile-menu-close" type="button" aria-label="Закрыть меню">×</button></div>
         <a class="nav-link active" href="#constructor" data-view="constructor"><span>◈</span> Конструктор задачи <small>01</small></a>
         <a class="nav-link" href="#workspace" data-view="workspace"><span>◫</span> Задачи бизнеса <small>02</small></a>
-        <a class="nav-link" href="#catalog" data-view="catalog"><span>▦</span> Каталог задач <small>03</small></a>
-        <a class="nav-link" href="#proposals" data-view="proposals"><span>↗</span> Отклики команд <small>04</small></a>
+        <a class="nav-link" href="#rating" data-view="rating"><span>◉</span> Рейтинг задач <small>03</small></a>
+        <a class="nav-link" href="#catalog" data-view="catalog"><span>▦</span> Каталог задач <small>04</small></a>
+        <a class="nav-link" href="#proposals" data-view="proposals"><span>↗</span> Выбор команд <small>05</small></a>
       </nav>
       <div class="header-actions">
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Включить тёмную тему" aria-pressed="false"><span aria-hidden="true">☾</span></button>
@@ -83,6 +84,13 @@
         <div class="workspace-actions"><div id="workspace-stats" class="workspace-stats"></div><button id="new-task-button" class="primary-button" type="button">+ Новая задача</button></div>
         <div id="workspace-list" class="workspace-grid"></div>
       </div>
+      <div class="content" id="rating-view" hidden>
+        <section class="page-intro"><span class="step-tag">ПРОЗРАЧНАЯ ОЦЕНКА · 0–100</span><h1>Рейтинг готовности задач</h1><p>Это оценка полноты подтверждённой задачи, а не популярности компании или качества команды. Даже задача с низким баллом остаётся в каталоге.</p></section>
+        <div class="rating-legend" aria-label="Уровни готовности"><span>0–39 · Черновик</span><span>40–69 · Рабочая</span><span>70–89 · Готовая</span><span>90–100 · Приоритетная</span></div>
+        <div class="rating-controls"><label for="rating-readiness">УРОВЕНЬ ГОТОВНОСТИ <select id="rating-readiness"><option value="">Все уровни</option><option value="low">Черновик · 0–39</option><option value="medium">Рабочая · 40–69</option><option value="high">Готовая · 70–89</option><option value="priority">Приоритетная · 90–100</option></select></label><p id="rating-summary" role="status"></p></div>
+        <div id="rating-list" class="rating-list"></div>
+        <section class="rating-formula stage-card"><h2>Как начисляются 100 баллов</h2><p>Баллы появляются только после ручного подтверждения карточки бизнесом. Незаполненные и очевидно некорректные поля не дают баллов; после дополнений требуется повторное подтверждение.</p><div id="rating-weights" class="rating-weights"></div></section>
+      </div>
       <div class="content" id="catalog-view" hidden>
         <section class="page-intro"><span class="step-tag">ОТКРЫТЫЕ ВОЗМОЖНОСТИ</span><h1>Каталог миссий</h1><p>Подтверждённые задачи сортируются по рейтингу, но низкий балл не скрывает задачу и не мешает команде откликнуться.</p></section>
         <section class="recommendations-panel" aria-label="Подбор задач"><details id="recommendation-details" open><summary>✦ Подобрать миссию по интересам <span aria-hidden="true">⌄</span></summary><div class="recommendations-body"><div><span class="step-tag">ДЛЯ КОМАНД</span><h2>Миссии по интересам</h2><p>Подбор по совпадению слов в интересах, навыках и описании задач. Это подсказка, не автоматическое назначение — весь каталог доступен ниже.</p></div><label>КОМАНДА <select id="recommendation-team"><option value="">Выберите команду</option></select></label><div id="recommendations-list" class="recommendations-list" aria-live="polite"></div></div></details></section>
@@ -92,10 +100,13 @@
         <section id="task-detail" class="stage-card" hidden></section>
       </div>
       <div class="content" id="proposals-view" hidden>
-        <section class="page-intro"><span class="step-tag">ВЫБОР ЗА БИЗНЕСОМ</span><h1>Отклики команд</h1><p>Предложения не назначаются автоматически. Бизнес может выбрать несколько команд, отклонить или оставить без решения.</p></section>
+        <section class="page-intro"><span class="step-tag">РЕШЕНИЕ ПРИНИМАЕТ ЧЕЛОВЕК</span><h1>Выбор команд</h1><p>Сравните идеи и планы по одной задаче. Можно выбрать одну, несколько или ни одной команды; система не назначает исполнителей автоматически.</p></section>
+        <p class="demo-boundary">Демо без входа в аккаунт: действия выбора доступны всем посетителям локального сайта. Для реальной работы нужны роли и права бизнеса.</p>
+        <div id="proposal-notice" class="notice" role="status" hidden></div>
         <div id="leaderboard" class="leaderboard"></div>
         <div class="toolbar"><label>ЗАДАЧА <select id="proposal-task-filter"><option value="">Все задачи</option></select></label><label>СТАТУС <select id="proposal-status-filter"><option value="">Все отклики</option><option value="pending">Ожидают решения</option><option value="selected">Выбраны</option><option value="rejected">Отклонены</option></select></label></div>
-        <div id="proposals-list" class="stack"></div>
+        <div id="proposal-summary" class="proposal-summary" role="status"></div>
+        <div id="proposals-list" class="proposal-compare-grid"></div>
       </div>
     </main>
   </div>
