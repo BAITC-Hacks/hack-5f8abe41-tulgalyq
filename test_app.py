@@ -48,12 +48,15 @@ class AppTest(unittest.TestCase):
         task_id = task["id"]
         self.assertEqual(len(task["questions"]), 3)
         self.assertEqual(self.api("/api/tasks")[1], [])
+        self.assertEqual(self.api("/api/workspace/tasks")[1][0]["status"], "draft")
         _, task = self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {"title": "Быстрая столовая", "need": "Сократить ожидание"}})
         self.assertEqual(task["preview_score"], 10)
         self.assertEqual(task["confirmed_score"], 0)
         _, task = self.api(f"/api/tasks/{task_id}/confirm", "POST")
         self.assertEqual(task["confirmed_score"], 10)
         self.assertEqual(len(self.api("/api/tasks")[1]), 1)
+        _, unchanged = self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {"title": "Быстрая столовая", "need": "Сократить ожидание"}})
+        self.assertEqual(unchanged["status"], "confirmed")
         _, team = self.api("/api/teams", "POST", {"name": "Тестовая команда", "skills": "Дизайн"})
         _, proposal = self.api("/api/proposals", "POST", {"task_id": task_id, "team_id": team["id"],
             "idea": "Предзаказ через телефон", "plan": "Сделать прототип и тест"})
@@ -84,6 +87,9 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(self.api("/api/tasks?readiness=high")[1]), 2)
         self.assertEqual(len(self.api("/api/teams")[1]), 5)
         self.assertEqual(len(self.api("/api/proposals")[1]), 5)
+        workspace = self.api("/api/workspace/tasks")[1]
+        self.assertEqual(len(workspace), 11)
+        self.assertEqual(sum(task["status"] == "draft" for task in workspace), 6)
 
     def test_ai_questions_keep_card_under_user_control(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Очередь в школьной столовой слишком длинная"})

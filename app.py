@@ -178,6 +178,17 @@ def list_tasks(topic="", sort="newest", readiness=""):
     return tasks
 
 
+def list_workspace_tasks():
+    """Demo workspace: includes drafts, without implying authenticated ownership."""
+    with connect() as db:
+        rows = db.execute("SELECT * FROM tasks ORDER BY updated_at DESC, rowid DESC").fetchall()
+        counts = dict(db.execute("SELECT task_id, COUNT(*) FROM proposals GROUP BY task_id").fetchall())
+    tasks = [task_from_row(row) for row in rows]
+    for task in tasks:
+        task["proposal_count"] = counts.get(task["id"], 0)
+    return tasks
+
+
 def list_proposals(task_id=None):
     with connect() as db:
         if task_id:
@@ -265,10 +276,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_file("extra.css", "text/css; charset=utf-8")
         if path == "/ai.css":
             return self.serve_file("ai.css", "text/css; charset=utf-8")
+        if path == "/workspace.css":
+            return self.serve_file("workspace.css", "text/css; charset=utf-8")
         if path == "/app.js":
             return self.serve_file("app.js", "text/javascript; charset=utf-8")
         if path == "/api/health":
             return self.json_response(200, {"ok": True, "ai_enabled": bool(os.getenv("OPENAI_API_KEY"))})
+        if path == "/api/workspace/tasks":
+            return self.json_response(200, list_workspace_tasks())
         if path == "/api/tasks":
             topic = query.get("topic", [""])[0]
             sort = query.get("sort", ["newest"])[0]
@@ -405,9 +420,11 @@ class Handler(BaseHTTPRequestHandler):
             changes = data.get("fields", {})
             if not isinstance(changes, dict) or any(name not in FIELDS for name in changes):
                 raise ValueError("Неизвестное поле карточки.")
-            fields = task["fields"]
+            fields = dict(task["fields"])
             for name, value in changes.items():
                 fields[name] = clean_text(value)
+            if fields == task["fields"]:
+                return self.json_response(200, task)
             with DB_LOCK, connect() as db:
                 db.execute("UPDATE tasks SET fields_json = ?, status = 'draft', confirmed_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                            (json.dumps(fields, ensure_ascii=False), task_id))

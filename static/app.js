@@ -8,6 +8,7 @@ const FIELD_LABELS = {
 const WEIGHTS = {context:10,need:10,data:20,expected_result:15,success_criteria:15,constraints:10,users:10,contact:5,interaction_format:5};
 let currentTask = null;
 let selectedCatalogTask = null;
+let proposalTaskFilterValue = "";
 const $ = (id) => document.getElementById(id);
 const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value !== undefined) node.textContent = value; return node; };
 
@@ -56,11 +57,19 @@ function fieldsFromForm() {
 function updatePreview() {
   const fields = fieldsFromForm();
   const preview = Object.entries(WEIGHTS).reduce((sum,[name,weight])=>sum+(fields[name]?weight:0),0);
-  $("score-number").textContent = currentTask.status === "confirmed" && JSON.stringify(fields) === JSON.stringify(currentTask.fields) ? currentTask.confirmed_score : preview;
-  $("score-state").textContent = currentTask.status === "confirmed" && JSON.stringify(fields) === JSON.stringify(currentTask.fields) ? "Подтверждено" : "Возможный рейтинг";
-  $("score-explain").textContent = currentTask.status === "confirmed" && JSON.stringify(fields) === JSON.stringify(currentTask.fields)
+  const confirmed = currentTask.status === "confirmed" && JSON.stringify(fields) === JSON.stringify(currentTask.fields);
+  $("score-number").textContent = confirmed ? currentTask.confirmed_score : preview;
+  $("score-state").textContent = confirmed ? "Подтверждено" : "Возможный рейтинг";
+  $("score-explain").textContent = confirmed
     ? "Баллы начислены за заполненные и подтверждённые сведения."
     : "Это предварительный результат. Баллы начислятся после подтверждения.";
+  const breakdown = $("breakdown-list"); breakdown.replaceChildren();
+  Object.entries(WEIGHTS).forEach(([name,weight]) => {
+    const filled = Boolean(fields[name]);
+    const row = el("div", "breakdown-item" + (filled ? "" : " missing"));
+    row.append(el("span", "", FIELD_LABELS[name]), el("b", "", filled ? (confirmed ? `${weight}/${weight}` : `+${weight} после подтверждения`) : `0/${weight}`));
+    breakdown.append(row);
+  });
   const missing = $("missing-list"); missing.replaceChildren();
   const entries = Object.entries(WEIGHTS).filter(([name])=>!fields[name]);
   if (!entries.length) missing.textContent = "Все поля рейтинга заполнены ✓";
@@ -112,19 +121,75 @@ $("back-to-draft").addEventListener("click",()=>showStage("draft"));
 })();
 
 function showView(view) {
-  for (const name of ["constructor", "catalog", "proposals"]) {
+  for (const name of ["constructor", "workspace", "catalog", "proposals"]) {
     $(name+"-view").hidden = name !== view;
     document.querySelector(`[data-view="${name}"]`).classList.toggle("active", name === view);
   }
   $("notice").hidden = true;
   $("task-detail").hidden = true;
-  $("current-view-label").textContent = {constructor:"Конструктор задачи",catalog:"Каталог задач",proposals:"Отклики команд"}[view];
+  $("current-view-label").textContent = {constructor:"Конструктор задачи",workspace:"Задачи бизнеса",catalog:"Каталог задач",proposals:"Отклики команд"}[view];
+  if (view === "workspace") loadWorkspace();
   if (view === "catalog") loadCatalog();
   if (view === "proposals") loadProposals();
   window.scrollTo(0, 0);
 }
-window.addEventListener("hashchange", () => showView(["catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor"));
-showView(["catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor");
+window.addEventListener("hashchange", () => showView(["workspace", "catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor"));
+showView(["workspace", "catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor");
+
+async function loadWorkspace() {
+  try {
+    const tasks = await request("/api/workspace/tasks");
+    const stats = $("workspace-stats"); stats.replaceChildren();
+    for (const [label, count] of [["Всего задач", tasks.length], ["Черновиков", tasks.filter(task => task.status !== "confirmed").length], ["В каталоге", tasks.filter(task => task.status === "confirmed").length]]) {
+      const item = el("div", "workspace-stat"); item.append(el("b", "", String(count)), el("span", "", label)); stats.append(item);
+    }
+    const list = $("workspace-list"); list.replaceChildren();
+    if (!tasks.length) list.append(el("p", "empty-state", "Задач пока нет. Начните с нового черновика."));
+    tasks.forEach(task => {
+      const card = el("article", "workspace-card");
+      card.append(el("span", "step-tag", task.topic),
+        el("h2", "", task.fields.title || task.raw_description),
+        el("p", "", task.fields.need || task.raw_description));
+      const meta = el("div", "workspace-meta");
+      meta.append(el("span", task.status === "confirmed" ? "" : "draft-chip", task.status === "confirmed" ? `В каталоге · ${task.confirmed_score}/100` : `Черновик · возможные ${task.preview_score}/100`),
+        el("span", "", `${task.proposal_count} откл.`));
+      const actions = el("div", "workspace-actions-row");
+      const edit = el("button", "secondary-button", "Редактировать"); edit.type = "button";
+      edit.addEventListener("click", () => openEditor(task.id)); actions.append(edit);
+      if (task.status === "confirmed") {
+        const catalog = el("button", "primary-button", "В каталоге →"); catalog.type = "button";
+        catalog.addEventListener("click", async () => { location.hash = "catalog"; await loadCatalog(); await openTask(task.id); });
+        actions.append(catalog);
+        if (task.proposal_count) {
+          const proposals = el("button", "secondary-button", `Отклики (${task.proposal_count})`); proposals.type = "button";
+          proposals.addEventListener("click", () => {
+            proposalTaskFilterValue = task.id;
+            if (location.hash === "#proposals") loadProposals();
+            else location.hash = "proposals";
+          });
+          actions.append(proposals);
+        }
+      } else {
+        const questions = el("button", "primary-button", "Уточнить →"); questions.type = "button";
+        questions.addEventListener("click", () => openEditor(task.id, true)); actions.append(questions);
+      }
+      card.append(meta, actions); list.append(card);
+    });
+  } catch (error) { $("workspace-list").textContent = error.message; }
+}
+async function openEditor(id, questions=false) {
+  try {
+    updateTask(await request(`/api/tasks/${id}`));
+    location.hash = "constructor";
+    if (questions) { buildQuestions(); $("question-source").textContent = "Уточняющие вопросы по шаблону"; showStage("questions"); }
+    else { buildCard(); showStage("card"); }
+  } catch (error) { alert(error.message); }
+}
+$("new-task-button").addEventListener("click", () => {
+  currentTask = null; localStorage.removeItem("mission100_task_id");
+  $("description").value = ""; $("topic").selectedIndex = 0;
+  location.hash = "constructor"; showStage("draft");
+});
 
 async function loadCatalog() {
   try {
@@ -199,7 +264,18 @@ async function openTask(id) {
 
 async function loadProposals() {
   try {
-    const [proposals, teams] = await Promise.all([request("/api/proposals"), request("/api/teams")]);
+    const [allProposals, teams, tasks] = await Promise.all([request("/api/proposals"), request("/api/teams"), request("/api/workspace/tasks")]);
+    const taskFilter = $("proposal-task-filter");
+    const previousTask = proposalTaskFilterValue || taskFilter.value;
+    taskFilter.replaceChildren(new Option("Все задачи", ""));
+    tasks.filter(task => task.status === "confirmed" || task.proposal_count).forEach(task =>
+      taskFilter.append(new Option(task.fields.title || task.raw_description, task.id)));
+    taskFilter.value = previousTask;
+    proposalTaskFilterValue = taskFilter.value;
+    const status = $("proposal-status-filter").value;
+    const proposals = allProposals.filter(proposal =>
+      (!proposalTaskFilterValue || proposal.task_id === proposalTaskFilterValue) && (!status || proposal.status === status));
+    const taskById = new Map(tasks.map(task => [task.id, task]));
     const leaderboard = $("leaderboard"); leaderboard.replaceChildren();
     leaderboard.append(el("strong", "", "Прогресс команд"));
     teams.forEach((team, index) => {
@@ -207,12 +283,15 @@ async function loadProposals() {
       row.append(el("b", "", `${team.points} баллов`)); leaderboard.append(row);
     });
     const list = $("proposals-list"); list.replaceChildren();
-    if (!proposals.length) list.append(el("p", "empty-state", "Откликов пока нет. Команды могут предложить решение из каталога."));
+    if (!proposals.length) list.append(el("p", "empty-state", "По выбранным фильтрам откликов нет."));
     for (const proposal of proposals) {
-      const task = await request(`/api/tasks/${proposal.task_id}`);
+      const task = taskById.get(proposal.task_id);
+      if (!task) continue;
       const card = el("article", "stage-card proposal-card");
-      card.append(el("span", "step-tag", `${proposal.team_name} · ${proposal.status}`),
+      const statusLabel = {pending:"ожидает решения",selected:"выбрана",rejected:"отклонена"}[proposal.status] || proposal.status;
+      card.append(el("span", "step-tag", `${proposal.team_name} · ${statusLabel}`),
         el("h2", "", task.fields.title || task.raw_description),
+        el("p", "", `Навыки: ${proposal.team_skills || "не указаны"}`),
         el("p", "", proposal.idea), el("p", "", `План: ${proposal.plan}`));
       if (proposal.prototype_url) {
         const link = el("a", "", "Открыть прототип ↗"); link.href = proposal.prototype_url;
@@ -232,6 +311,8 @@ async function loadProposals() {
     }
   } catch (error) { $("proposals-list").textContent = error.message; }
 }
+$("proposal-task-filter").addEventListener("change", () => { proposalTaskFilterValue = $("proposal-task-filter").value; loadProposals(); });
+$("proposal-status-filter").addEventListener("change", loadProposals);
 async function addProgress(card, proposalId) {
   card.append(el("h3", "", "Этапы работы · +10 за подтверждение"));
   const progress = await request(`/api/proposals/${proposalId}/progress`);

@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/extra.css">
   <link rel="stylesheet" href="/ai.css">
+  <link rel="stylesheet" href="/workspace.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="/app.js" defer></script>
 </head>
@@ -20,8 +21,9 @@
       <div class="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
       <nav aria-label="Разделы">
         <a class="nav-link active" href="#constructor" data-view="constructor"><span>◈</span> Конструктор задачи <small>01</small></a>
-        <a class="nav-link" href="#catalog" data-view="catalog"><span>▦</span> Каталог задач <small>02</small></a>
-        <a class="nav-link" href="#proposals" data-view="proposals"><span>↗</span> Отклики команд <small>03</small></a>
+        <a class="nav-link" href="#workspace" data-view="workspace"><span>◫</span> Задачи бизнеса <small>02</small></a>
+        <a class="nav-link" href="#catalog" data-view="catalog"><span>▦</span> Каталог задач <small>03</small></a>
+        <a class="nav-link" href="#proposals" data-view="proposals"><span>↗</span> Отклики команд <small>04</small></a>
       </nav>
       <div class="sidebar-bottom">
         <div class="side-note"><span class="note-icon">✦</span><div><strong>Путь к 100 баллам</strong><p>Чёткая задача привлекает сильные команды.</p></div></div>
@@ -67,8 +69,13 @@
         <section id="card-section" class="stage-card" hidden>
           <div class="stage-heading"><div><span class="step-tag">ШАГ 03 / 03</span><h2>Проверьте карточку</h2><p>Система сохранила только введённые вами сведения. Заполните пропуски и подтвердите результат.</p></div><span class="stage-icon">✓</span></div>
           <div class="editor-layout"><form id="card-form"><div id="card-fields"></div><div class="actions"><button class="secondary-button" type="submit">Сохранить изменения</button><button class="primary-button" id="confirm-button" type="button">Подтвердить карточку <span>✓</span></button></div></form>
-          <aside class="score-panel"><div class="score-label">ГОТОВНОСТЬ ЗАДАЧИ</div><div class="score-circle"><strong id="score-number">0</strong><span>/ 100</span></div><div class="score-state" id="score-state">Черновик</div><p id="score-explain">Баллы начисляются после вашего подтверждения.</p><div class="score-rule"></div><div class="score-label">ПУТЬ К 100 БАЛЛАМ</div><div id="missing-list" class="missing-list"></div></aside></div>
+          <aside class="score-panel"><div class="score-label">ГОТОВНОСТЬ ЗАДАЧИ</div><div class="score-circle"><strong id="score-number">0</strong><span>/ 100</span></div><div class="score-state" id="score-state">Черновик</div><p id="score-explain">Баллы начисляются после вашего подтверждения.</p><div class="score-rule"></div><div class="score-label">РАЗБИВКА ПО ПОЛЯМ</div><div id="breakdown-list" class="breakdown-list"></div><div class="score-rule"></div><div class="score-label">ПУТЬ К 100 БАЛЛАМ</div><div id="missing-list" class="missing-list"></div></aside></div>
         </section>
+      </div>
+      <div class="content" id="workspace-view" hidden>
+        <section class="page-intro"><span class="step-tag">КАБИНЕТ БИЗНЕСА · ДЕМО</span><h1>Миссии бизнеса</h1><p>Продолжайте черновики и улучшайте опубликованные задачи. Пока нет входа в аккаунт, здесь видны все записи демо-базы.</p></section>
+        <div class="workspace-actions"><div id="workspace-stats" class="workspace-stats"></div><button id="new-task-button" class="primary-button" type="button">+ Новая задача</button></div>
+        <div id="workspace-list" class="workspace-grid"></div>
       </div>
       <div class="content" id="catalog-view" hidden>
         <section class="page-intro"><span class="step-tag">ОТКРЫТЫЕ ВОЗМОЖНОСТИ</span><h1>Каталог миссий</h1><p>Даже задачи с низким рейтингом открыты для предложений. Команда сама решает, за что взяться.</p></section>
@@ -79,10 +86,11 @@
       <div class="content" id="proposals-view" hidden>
         <section class="page-intro"><span class="step-tag">ВЫБОР ЗА БИЗНЕСОМ</span><h1>Отклики команд</h1><p>Предложения не назначаются автоматически. Бизнес может выбрать несколько команд, отклонить или оставить без решения.</p></section>
         <div id="leaderboard" class="leaderboard"></div>
+        <div class="toolbar"><label>ЗАДАЧА <select id="proposal-task-filter"><option value="">Все задачи</option></select></label><label>СТАТУС <select id="proposal-status-filter"><option value="">Все отклики</option><option value="pending">Ожидают решения</option><option value="selected">Выбраны</option><option value="rejected">Отклонены</option></select></label></div>
         <div id="proposals-list" class="stack"></div>
       </div>
     </main>
   </div>
-  <nav class="mobile-nav" aria-label="Разделы на телефоне"><a href="#constructor">Конструктор</a><a href="#catalog">Каталог</a><a href="#proposals">Отклики</a></nav>
+  <nav class="mobile-nav" aria-label="Разделы на телефоне"><a href="#constructor">Создать</a><a href="#workspace">Миссии</a><a href="#catalog">Каталог</a><a href="#proposals">Отклики</a></nav>
 </body>
 </html>
