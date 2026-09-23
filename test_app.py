@@ -65,6 +65,10 @@ class AppTest(unittest.TestCase):
         self.assertIn('id="theme-toggle"', page)
         self.assertIn('id="primary-nav"', page)
         self.assertIn('id="catalog-search"', page)
+        self.assertIn('id="publish-success"', page)
+        self.assertIn('id="publish-new-task"', page)
+        self.assertIn('class="ai-safety-note"', page)
+        self.assertIn('Черновик · требует уточнения · 0–39', page)
         self.assertIn('id="catalog-reset"', page)
         self.assertIn('id="score-details"', page)
         self.assertIn('.score-panel summary', mobile_css)
@@ -87,6 +91,8 @@ class AppTest(unittest.TestCase):
         _, task = self.api(f"/api/tasks/{task_id}/confirm", "POST")
         self.assertEqual(task["confirmed_score"], 10)
         self.assertEqual(len(self.api("/api/tasks")[1]), 1)
+        self.assertEqual(self.api("/api/tasks?readiness=low")[1][0]["id"], task_id)
+        self.assertEqual(task["readiness_level"], "low")
         _, unchanged = self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {"title": "Быстрая столовая", "need": "Сократить ожидание"}})
         self.assertEqual(unchanged["status"], "confirmed")
         _, team = self.api("/api/teams", "POST", {"name": "Тестовая команда", "skills": "Дизайн"})
@@ -159,10 +165,25 @@ class AppTest(unittest.TestCase):
         self.assertTrue(all(task["topic"] for task in demo_drafts))
 
     def test_readiness_boundaries_match_hackathon_case(self):
+        self.assertEqual(app.WEIGHTS, {
+            "context": 10, "need": 10, "data": 20, "expected_result": 15,
+            "success_criteria": 15, "constraints": 10, "users": 10,
+            "contact": 5, "interaction_format": 5,
+        })
+        self.assertEqual(sum(app.WEIGHTS.values()), 100)
         for score, level in [(0, "low"), (39, "low"), (40, "medium"),
                              (69, "medium"), (70, "high"), (89, "high"),
                              (90, "priority"), (100, "priority")]:
             self.assertEqual(app.readiness_level(score), level)
+
+    def test_zero_point_card_requires_confirmation_but_stays_visible(self):
+        description = "Нужно сократить очередь в школьной столовой"
+        _, task = self.api("/api/tasks", "POST", {"description": description})
+        self.assertEqual(self.api("/api/tasks")[1], [])
+        _, published = self.api(f"/api/tasks/{task['id']}/confirm", "POST")
+        self.assertEqual(published["confirmed_score"], 0)
+        self.assertEqual(published["readiness_level"], "low")
+        self.assertEqual(self.api("/api/tasks?readiness=low")[1][0]["raw_description"], description)
 
     def test_obvious_placeholders_do_not_raise_rating(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Нужно улучшить очередь в школьной столовой"})
@@ -176,12 +197,18 @@ class AppTest(unittest.TestCase):
         self.assertIn("data", task["quality_issues"])
         self.assertIn("contact", task["quality_issues"])
         self.assertIn("data", [item["field"] for item in task["questions"]])
-        self.assertEqual(self.api(f"/api/tasks/{task_id}/confirm", "POST")[0], 400)
+        _, published_draft = self.api(f"/api/tasks/{task_id}/confirm", "POST")
+        self.assertEqual(published_draft["confirmed_score"], 0)
+        self.assertEqual(self.api("/api/tasks?readiness=low")[1][0]["id"], task_id)
+        _, team = self.api("/api/teams", "POST", {"name": "Команда уточнения"})
+        self.assertEqual(self.api("/api/proposals", "POST", {"task_id": task_id, "team_id": team["id"],
+            "idea": "Уточним проблему очереди", "plan": "Обсудим условия и предложим прототип"})[0], 201)
         _, corrected = self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {
             "title": "Уменьшить очередь в столовой", "need": "Сократить время ожидания обеда",
             "data": "Обезличенные замеры времени ожидания", "contact": "@schoolteam",
         }})
         self.assertEqual(corrected["preview_score"], 35)
+        self.assertEqual(corrected["confirmed_score"], 0)
         self.assertEqual(self.api(f"/api/tasks/{task_id}/confirm", "POST")[1]["confirmed_score"], 35)
 
     def test_ai_questions_keep_card_under_user_control(self):
@@ -192,23 +219,45 @@ class AppTest(unittest.TestCase):
             {"field": "success_criteria", "text": "Как измерить успешное сокращение очереди?"},
             {"field": "expected_result", "text": "Какой результат должна получить школа?"},
         ]})}]}]}
+        typed_need = "Сократить ожидание учеников у стойки выдачи"
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(app, "urlopen", return_value=BytesIO(json.dumps(result).encode())) as mocked:
-            code, answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")
+            code, answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST",
+                                    {"answers": {"need": typed_need}})
         sent = json.loads(mocked.call_args.args[0].data)
         self.assertEqual(json.loads(sent["input"])["fields"]["users"], "Ученики школы")
+        self.assertEqual(json.loads(sent["input"])["fields"]["need"], typed_need)
         self.assertNotIn("users", sent["text"]["format"]["schema"]["properties"]["questions"]["items"]["properties"]["field"]["enum"])
+        self.assertNotIn("need", sent["text"]["format"]["schema"]["properties"]["questions"]["items"]["properties"]["field"]["enum"])
         self.assertEqual(code, 200)
         self.assertEqual(answer["source"], "openai")
         self.assertEqual(len(answer["questions"]), 3)
         self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["data"], "тест")
+        self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["need"], "")
 
-    def test_bad_ai_response_is_rejected_without_changing_task(self):
+    def test_bad_ai_response_falls_back_without_changing_task(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Клиентам трудно выбрать школьный кружок"})
         invalid = {"output": [{"type": "message", "content": [{"type": "output_text",
             "text": json.dumps({"questions": [{"field": "data", "text": "Есть ли данные?"}]})}]}]}
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(app, "urlopen", return_value=BytesIO(json.dumps(invalid).encode())):
-            self.assertEqual(self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")[0], 400)
+            code, answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")
+        self.assertEqual(code, 200)
+        self.assertEqual(answer["source"], "local")
+        self.assertEqual(answer["fallback_reason"], "api_unavailable")
+        self.assertEqual(len(answer["questions"]), 3)
         self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["data"], "")
+
+    def test_local_questions_when_key_is_missing(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}):
+            code, answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST",
+                                    {"answers": {"need": "Сократить ожидание обеда"}})
+        self.assertEqual(code, 200)
+        self.assertEqual(answer["source"], "local")
+        self.assertEqual(answer["fallback_reason"], "not_configured")
+        self.assertNotIn("need", [question["field"] for question in answer["questions"]])
+        self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["need"], "")
+        self.assertEqual(self.api(f"/api/tasks/{task['id']}/ai-questions", "POST",
+                                  {"answers": {"unknown_field": "x"}})[0], 400)
 
     def test_proposal_requires_valid_prototype_address(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})

@@ -1,18 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title id="title">Tulgalyq</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" role="img" aria-labelledby="title">
+  <title id="title">Tulgalyq — путь от идеи к решению</title>
   <defs>
-    <linearGradient id="tile" x1="4" y1="4" x2="60" y2="60" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#913E4D"/>
-      <stop offset="1" stop-color="#D27C84"/>
+    <linearGradient id="tile" x1="9" y1="6" x2="70" y2="76" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#713247"/>
+      <stop offset=".54" stop-color="#A84D5B"/>
+      <stop offset="1" stop-color="#D97878"/>
     </linearGradient>
-    <linearGradient id="spark" x1="24" y1="24" x2="41" y2="41" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#FFE0D7"/>
+    <linearGradient id="route" x1="18" y1="58" x2="59" y2="24" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE4DF"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
     </linearGradient>
   </defs>
-  <rect x="1" y="1" width="62" height="62" rx="19" fill="url(#tile)"/>
-  <path d="M16 45V31c0-9 7-16 16-16s16 7 16 16v14" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round"/>
-  <path d="M14 47h36" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" opacity=".72"/>
-  <path d="m32 22 2.65 7.35L42 32l-7.35 2.65L32 42l-2.65-7.35L22 32l7.35-2.65L32 22Z" fill="url(#spark)"/>
-  <circle cx="32" cy="32" r="2" fill="#AE5360"/>
+  <rect x="2" y="2" width="76" height="76" rx="23" fill="url(#tile)"/>
+  <rect x="4.5" y="4.5" width="71" height="71" rx="20.5" fill="none" stroke="#FFFFFF" stroke-opacity=".24"/>
+  <path d="M18 57c8-12 15-8 22-17 5-7 11-7 18-17" fill="none" stroke="url(#route)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="19" cy="57" r="5" fill="#FFFFFF"/>
+  <circle cx="39" cy="41" r="4.2" fill="#FFE3D8"/>
+  <path d="m58 12 3.3 8.7L70 24l-8.7 3.3L58 36l-3.3-8.7L46 24l8.7-3.3L58 12Z" fill="#FFF9E9"/>
+  <path d="M21 67h38" stroke="#FFFFFF" stroke-opacity=".46" stroke-width="2.5" stroke-linecap="round"/>
 </svg>

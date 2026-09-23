@@ -145,21 +145,26 @@ def readiness_level(score):
     return "priority"
 
 
+def suggest_questions(fields):
+    missing = [
+        {"field": field, "text": question}
+        for field, question in QUESTION_BANK if quality_issue(field, fields.get(field, ""))
+    ][:3]
+    if len(missing) < 3:
+        missing += [
+            {"field": field, "text": question}
+            for field, question in QUESTION_BANK if not quality_issue(field, fields.get(field, ""))
+        ][:3 - len(missing)]
+    return missing
+
+
 def task_from_row(row, published=False):
     editor_fields = json.loads(row["fields_json"])
     published_fields = json.loads(row["published_fields_json"]) if row["published_fields_json"] else editor_fields
     fields = published_fields if published and row["status"] == "confirmed" else editor_fields
     preview_score, earned = score_fields(fields)
     published_score, _ = score_fields(published_fields)
-    questions = [
-        {"field": field, "text": question}
-        for field, question in QUESTION_BANK if quality_issue(field, fields.get(field, ""))
-    ][:3]
-    if len(questions) < 3:
-        questions += [
-            {"field": field, "text": question}
-            for field, question in QUESTION_BANK if not quality_issue(field, fields.get(field, ""))
-        ][:3 - len(questions)]
+    questions = suggest_questions(fields)
     return {
         "id": row["id"], "raw_description": row["raw_description"],
         "topic": row["topic"], "fields": fields, "status": row["status"],
@@ -226,6 +231,15 @@ def ai_questions(task):
         return [{"field": q["field"], "text": q["text"].strip()} for q in questions]
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
         raise ValueError("AI сейчас недоступен. Используйте обычные уточняющие вопросы.") from error
+
+
+def question_response(task):
+    if not os.getenv("OPENAI_API_KEY"):
+        return {"questions": task["questions"], "source": "local", "fallback_reason": "not_configured"}
+    try:
+        return {"questions": ai_questions(task), "source": "openai"}
+    except ValueError:
+        return {"questions": task["questions"], "source": "local", "fallback_reason": "api_unavailable"}
 
 
 def list_tasks(topic="", sort="rating", readiness=""):
@@ -437,7 +451,14 @@ class Handler(BaseHTTPRequestHandler):
                 task = get_task(task_id)
                 if not task:
                     return self.json_response(404, {"error": "Задача не найдена."})
-                return self.json_response(200, {"questions": ai_questions(task), "source": "openai"})
+                answers = data.get("answers", {})
+                if not isinstance(answers, dict) or any(name not in FIELDS for name in answers):
+                    raise ValueError("Неизвестное поле ответа.")
+                fields = dict(task["fields"])
+                for name, value in answers.items():
+                    fields[name] = clean_text(value)
+                question_task = {**task, "fields": fields, "questions": suggest_questions(fields)}
+                return self.json_response(200, question_response(question_task))
             if path == "/api/tasks":
                 raw = clean_text(data.get("description", ""))
                 topic = clean_text(data.get("topic", "Другое"), 80)
@@ -457,8 +478,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not task:
                     return self.json_response(404, {"error": "Задача не найдена."})
                 fields = task["fields"]
-                if quality_issue("title", fields["title"]) or quality_issue("need", fields["need"]):
-                    raise ValueError("Перед подтверждением укажите осмысленные название и потребность.")
                 score, _ = score_fields(fields)
                 with DB_LOCK, connect() as db:
                     db.execute("""UPDATE tasks SET status = 'confirmed', confirmed_score = ?,

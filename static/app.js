@@ -18,7 +18,7 @@ const IMPROVEMENT_QUESTIONS = {
   interaction_format: "Как часто бизнес сможет давать обратную связь?"
 };
 const PLACEHOLDERS = new Set(["тест","test","нет","незнаю","потом","заполнить","xxx","asdf","qwerty","йцукен"]);
-const READINESS_LABELS = {low:"Нужно уточнить",medium:"Рабочая",high:"Готовая",priority:"Приоритетная"};
+const READINESS_LABELS = {low:"Черновик · требует уточнения",medium:"Рабочая",high:"Готовая",priority:"Приоритетная"};
 let currentTask = null;
 let selectedCatalogTask = null;
 let proposalTaskFilterValue = "";
@@ -155,7 +155,7 @@ function updatePreview() {
   nextButton.hidden = !nextField;
   nextButton.dataset.field = nextField || "";
   if (nextField) {
-    $("passport-next-title").textContent = blocker ? `Для публикации: ${FIELD_LABELS[nextField]}` : `${FIELD_LABELS[nextField]} · до +${WEIGHTS[nextField]}`;
+    $("passport-next-title").textContent = blocker ? `Для понятной карточки: ${FIELD_LABELS[nextField]}` : `${FIELD_LABELS[nextField]} · до +${WEIGHTS[nextField]}`;
     $("passport-next-text").textContent = blocker === "title" ? "Назовите миссию так, чтобы команда сразу поняла её суть." : IMPROVEMENT_QUESTIONS[nextField];
   } else {
     $("passport-next-title").textContent = confirmed ? "Миссия опубликована" : "Карточка готова к подтверждению";
@@ -212,14 +212,36 @@ async function saveCard() {
   } catch(error) { showNotice(error.message,true); return false; }
 }
 $("confirm-button").addEventListener("click",async()=>{
-  if (!(await saveCard())) return;
+  const button = $("confirm-button");
+  if (button.disabled) return;
+  button.disabled = true;
   try {
-    updateTask(await request(`/api/tasks/${currentTask.id}/confirm`,{method:"POST",body:"{}"}));
-    updatePreview(); showNotice(`Карточка подтверждена. Рейтинг готовности: ${currentTask.confirmed_score}/100.`);
-    await loadCatalog();
+    if (!(await saveCard())) return;
+    const published = await request(`/api/tasks/${currentTask.id}/confirm`,{method:"POST",body:"{}"});
+    $("publish-success-text").textContent = `Рейтинг готовности: ${published.confirmed_score}/100. Карточка сохранена здесь — её можно открыть, дополнить и повторно подтвердить.`;
+    $("publish-success").hidden = false;
+    resetConstructor();
+    if (location.hash === "#workspace") showView("workspace");
+    else location.hash = "workspace";
   } catch(error) { showNotice(error.message,true); }
+  finally { button.disabled = false; }
 });
-$("back-to-draft").addEventListener("click",()=>showStage("draft"));
+function resetConstructor() {
+  currentTask = null;
+  pendingQuestionAnswers = {};
+  localStorage.removeItem("mission100_task_id");
+  $("draft-form").reset();
+  $("questions-list").replaceChildren();
+  $("card-fields").replaceChildren();
+  showStage("draft");
+}
+function startNewTask() {
+  $("publish-success").hidden = true;
+  resetConstructor();
+  location.hash = "constructor";
+  $("description").focus({preventScroll:true});
+}
+$("back-to-draft").addEventListener("click", startNewTask);
 (async()=>{
   const id = localStorage.getItem("mission100_task_id"); if (!id) return;
   try { updateTask(await request(`/api/tasks/${id}`)); buildCard(); showStage("card"); }
@@ -242,6 +264,7 @@ function showView(view) {
   });
   $("notice").hidden = true;
   $("task-detail").hidden = true;
+  if (view !== "workspace") $("publish-success").hidden = true;
   $("current-view-label").textContent = {constructor:"Конструктор задачи",workspace:"Задачи бизнеса",catalog:"Каталог задач",proposals:"Отклики команд"}[view];
   if (view === "workspace") loadWorkspace();
   if (view === "catalog") { loadCatalog(); loadRecommendations(); }
@@ -309,11 +332,8 @@ async function openEditor(id, questions=false) {
     else { buildCard(); showStage("card"); }
   } catch (error) { alert(error.message); }
 }
-$("new-task-button").addEventListener("click", () => {
-  currentTask = null; localStorage.removeItem("mission100_task_id");
-  $("description").value = ""; $("topic").selectedIndex = 0;
-  location.hash = "constructor"; showStage("draft");
-});
+$("new-task-button").addEventListener("click", startNewTask);
+$("publish-new-task").addEventListener("click", startNewTask);
 
 async function loadCatalog() {
   const requestId = ++catalogRequestId;
@@ -343,7 +363,7 @@ function renderCatalog() {
   }
   tasks.forEach(task => {
     const card = el("article", "catalog-card");
-    card.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || task.raw_description),
+    card.append(el("span", "step-tag", task.topic), el("h2", "", task.quality_issues.title ? task.raw_description : (task.fields.title || task.raw_description)),
       el("p", "", task.fields.need || task.raw_description));
     const nextField = Object.keys(WEIGHTS).filter(name => task.missing.includes(name)).sort((a,b) => WEIGHTS[b] - WEIGHTS[a])[0];
     if (task.rating_needs_review) card.append(el("div", "catalog-next", "Рейтинг ждёт перепроверки бизнесом"));
@@ -406,7 +426,7 @@ async function openTask(id) {
   selectedCatalogTask = await request(`/api/tasks/${id}?published=1`);
   const task = selectedCatalogTask;
   const detail = $("task-detail"); detail.replaceChildren(); detail.hidden = false;
-  detail.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || "Черновик задачи"),
+  detail.append(el("span", "step-tag", task.topic), el("h2", "", task.quality_issues.title ? task.raw_description : (task.fields.title || task.raw_description)),
     el("p", "", `Рейтинг: ${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]} · ${task.rating_needs_review ? "ожидает перепроверки" : "подтверждено бизнесом"}`));
   const grid = el("div", "detail-grid");
   Object.entries(FIELD_LABELS).forEach(([key, label]) => {
@@ -537,20 +557,29 @@ async function addProgress(card, proposalId) {
 }
 
 request("/api/health").then(status => {
-  $("ai-questions-button").disabled = !status.ai_enabled;
-  if (!status.ai_enabled) $("ai-questions-button").title = "Для AI нужен OPENAI_API_KEY на сервере";
+  const button = $("ai-questions-button");
+  button.textContent = status.ai_enabled ? "✦ Спросить AI" : "↻ Локальные вопросы";
+  button.title = status.ai_enabled
+    ? "AI предложит три вопроса; ответы останутся под вашим контролем"
+    : "Для живого AI нужен OPENAI_API_KEY на сервере. Сейчас работают локальные правила.";
 }).catch(() => {});
 $("ai-questions-button").addEventListener("click", async () => {
   const button = $("ai-questions-button"); button.disabled = true;
   const typedAnswers = Object.fromEntries([...$("questions-list").querySelectorAll("textarea")].map(input => [input.dataset.field, input.value]));
   pendingQuestionAnswers = {...pendingQuestionAnswers, ...typedAnswers};
-  $("question-source").textContent = "AI составляет вопросы…";
+  $("question-source").textContent = "Готовим уточняющие вопросы…";
   try {
-    const result = await request(`/api/tasks/${currentTask.id}/ai-questions`, {method:"POST", body:"{}"});
+    const result = await request(`/api/tasks/${currentTask.id}/ai-questions`, {
+      method:"POST", body:JSON.stringify({answers: pendingQuestionAnswers})
+    });
     currentTask.questions = result.questions; buildQuestions(pendingQuestionAnswers);
-    $("question-source").textContent = "Вопросы предложены AI · ответы проверяете вы";
+    $("question-source").textContent = result.source === "openai"
+      ? "Вопросы предложены AI · ответы проверяете вы"
+      : result.fallback_reason === "api_unavailable"
+        ? "AI недоступен · показаны локальные вопросы"
+        : "Локальные вопросы · API не подключён";
   } catch (error) {
-    $("question-source").textContent = "Локальные вопросы · AI недоступен";
+    $("question-source").textContent = "Не удалось обновить вопросы · ваши ответы сохранены";
     showNotice(error.message, true);
   } finally { button.disabled = false; }
 });
