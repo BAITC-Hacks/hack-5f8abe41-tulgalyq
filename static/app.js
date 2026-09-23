@@ -559,9 +559,11 @@ async function addProgress(card, proposalId) {
 request("/api/health").then(status => {
   const button = $("ai-questions-button");
   button.textContent = status.ai_enabled ? "✦ Спросить AI" : "↻ Локальные вопросы";
-  button.title = status.ai_enabled
-    ? "AI предложит три вопроса; ответы останутся под вашим контролем"
-    : "Для живого AI нужен OPENAI_API_KEY на сервере. Сейчас работают локальные правила.";
+  button.title = status.ai_setup_issue === "web_link"
+    ? "В OPENAI_API_KEY задана веб-ссылка. Нужен секретный API-ключ из OpenAI Platform."
+    : status.ai_enabled
+      ? "AI предложит три вопроса; ответы останутся под вашим контролем"
+      : "Для живого AI нужен OPENAI_API_KEY на сервере. Сейчас работают локальные правила.";
 }).catch(() => {});
 $("ai-questions-button").addEventListener("click", async () => {
   const button = $("ai-questions-button"); button.disabled = true;
@@ -574,6 +576,7 @@ $("ai-questions-button").addEventListener("click", async () => {
     });
     currentTask.questions = result.questions; buildQuestions(pendingQuestionAnswers);
     const fallbackLabels = {
+      invalid_configuration: "Вместо API-ключа задана ссылка · показаны локальные вопросы",
       auth_failed: "AI: доступ к API отклонён · показаны локальные вопросы",
       rate_limited: "AI: достигнут лимит API · показаны локальные вопросы",
       api_unavailable: "AI недоступен · показаны локальные вопросы"

@@ -47,6 +47,16 @@ AI_INSTRUCTIONS = (
 DB_LOCK = threading.Lock()
 
 
+def ai_key_state():
+    """A platform/promo URL is not a bearer credential."""
+    value = os.getenv("OPENAI_API_KEY", "").strip()
+    if not value:
+        return "missing"
+    if "://" in value or value.startswith(("www.", "platform.openai.com/", "chatgpt.com/")):
+        return "web_link"
+    return "configured"
+
+
 def connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(str(DB_PATH))
@@ -197,9 +207,9 @@ def get_task(task_id, published=False):
 
 def ai_questions(task):
     """Ask only questions; never synthesize or save unverified business facts."""
-    key = os.getenv("OPENAI_API_KEY", "")
-    if not key:
-        raise ValueError("AI не настроен: задайте OPENAI_API_KEY на сервере.")
+    if ai_key_state() != "configured":
+        raise ValueError("AI не настроен: нужен секретный API-ключ, а не ссылка на страницу OpenAI.")
+    key = os.environ["OPENAI_API_KEY"].strip()
     allowed = [field for field, _ in QUESTION_BANK
                if quality_issue(field, task["fields"].get(field, ""))]
     if len(allowed) < 3:
@@ -246,8 +256,10 @@ def ai_questions(task):
 
 
 def question_response(task):
-    if not os.getenv("OPENAI_API_KEY"):
-        return {"questions": task["questions"], "source": "local", "fallback_reason": "not_configured"}
+    key_state = ai_key_state()
+    if key_state != "configured":
+        return {"questions": task["questions"], "source": "local",
+                "fallback_reason": "invalid_configuration" if key_state == "web_link" else "not_configured"}
     try:
         return {"questions": ai_questions(task), "source": "openai"}
     except ValueError as error:
@@ -423,7 +435,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/app.js":
             return self.serve_file("app.js", "text/javascript; charset=utf-8")
         if path == "/api/health":
-            return self.json_response(200, {"ok": True, "ai_enabled": bool(os.getenv("OPENAI_API_KEY"))})
+            key_state = ai_key_state()
+            payload = {"ok": True, "ai_enabled": key_state == "configured"}
+            if key_state == "web_link":
+                payload["ai_setup_issue"] = "web_link"
+            return self.json_response(200, payload)
         if path == "/api/workspace/tasks":
             return self.json_response(200, list_workspace_tasks())
         if path == "/api/tasks":

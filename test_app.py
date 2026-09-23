@@ -313,6 +313,19 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.api(f"/api/tasks/{task['id']}/ai-questions", "POST",
                                   {"answers": {"unknown_field": "x"}})[0], 400)
 
+    def test_platform_web_link_is_not_treated_as_api_key(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
+        for link in ("https://platform.openai.com/p/not-a-key", "platform.openai.com/p/not-a-key"):
+            with self.subTest(link_type=link.startswith("https")), patch.dict(os.environ, {"OPENAI_API_KEY": link}), \
+                    patch.object(app, "urlopen") as external_api:
+                self.assertEqual(self.api("/api/health")[1],
+                                 {"ok": True, "ai_enabled": False, "ai_setup_issue": "web_link"})
+                code, answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")
+                self.assertEqual(code, 200)
+                self.assertEqual(answer["source"], "local")
+                self.assertEqual(answer["fallback_reason"], "invalid_configuration")
+                external_api.assert_not_called()
+
     def test_proposal_requires_valid_prototype_address(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
         self.api(f"/api/tasks/{task['id']}", "PATCH", {"fields": {
