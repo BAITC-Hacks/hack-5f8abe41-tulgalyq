@@ -212,6 +212,7 @@ html[data-theme="dark"] .primary-button:hover { color: #21191a; }
 }
 .secondary-button:hover { background: var(--surface-soft); }
 .text-button { color: var(--accent); }
+.example-task { display: inline-flex; align-items: center; margin-top: 9px; padding: 5px 0; }
 .source-quote, .score-panel, .detail-field, .recommendations-panel, .leaderboard,
 .ai-toolbar, .workspace-stat, .passport-summary, .catalog-next {
   border: 1px solid var(--line);
@@ -247,6 +248,8 @@ html[data-theme="dark"] .primary-button:hover { color: #21191a; }
 .passport-next.complete { background: var(--surface); color: var(--ink); }
 .passport-summary p, .passport-gap-list { color: var(--muted); }
 .passport-summary .passport-review { background: var(--accent-soft); color: var(--ink); }
+.detail-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+.detail-actions .secondary-button { min-height: 42px; }
 .notice { background: var(--accent-soft); border-color: var(--line); color: var(--ink); }
 .notice.error { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .primary-button:focus-visible, .secondary-button:focus-visible, .text-button:focus-visible,
@@ -339,6 +342,7 @@ html[data-theme="dark"] .primary-button:hover { color: #21191a; }
   .score-panel summary { border-top-color: var(--line); }
   .recommendations-panel details[open] summary { border-bottom-color: var(--line); }
   .passport-summary { background: var(--surface-soft); }
+  .detail-actions .secondary-button { width: 100%; }
   .publish-success { grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 18px; }
   .publish-success-icon { width: 43px; height: 43px; font-size: 24px; }
   .publish-success h2 { font-size: 16px; }

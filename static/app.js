@@ -186,6 +186,16 @@ $("passport-next-button").addEventListener("click", () => {
   input.scrollIntoView({behavior:"smooth",block:"center"});
   input.focus({preventScroll:true});
 });
+const exampleButton = $("example-task");
+const syncExampleButton = () => { exampleButton.hidden = Boolean($("description").value.trim()); };
+$("description").addEventListener("input", syncExampleButton);
+exampleButton.addEventListener("click", () => {
+  $("description").value = "В школьной столовой длинные очереди. Хотим понять, как сократить время ожидания обеда для учеников.";
+  $("topic").value = "Общепит";
+  syncExampleButton();
+  $("description").focus();
+});
+syncExampleButton();
 $("draft-form").addEventListener("submit",async (event)=>{
   event.preventDefault();
   try {
@@ -231,6 +241,7 @@ function resetConstructor() {
   pendingQuestionAnswers = {};
   localStorage.removeItem("mission100_task_id");
   $("draft-form").reset();
+  syncExampleButton();
   $("questions-list").replaceChildren();
   $("card-fields").replaceChildren();
   showStage("draft");
@@ -422,12 +433,53 @@ $("seed-button").addEventListener("click", async () => {
   } catch (error) { alert(error.message); }
 });
 
+function missionPassport(task) {
+  const quote = value => String(value || "Не указано").replace(/\r\n?/g, "\n").split("\n")
+    .map(line => `> ${line}`).join("\n");
+  const lines = [
+    "# Паспорт миссии · Tulgalyq", "",
+    "Подтверждённая бизнесом версия задачи. AI не добавлял факты в эту карточку.", "",
+    `**Тема:** ${task.topic}`, "",
+    `**Готовность:** ${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]}`, "",
+    "Рейтинг показывает заполненность подтверждённых полей, а не известность компании или качество команды.", "",
+  ];
+  if (task.rating_needs_review) lines.push("**Важно:** рейтинг ожидает перепроверки бизнесом.", "");
+  lines.push("## Исходный запрос бизнеса", "", quote(task.raw_description), "",
+    "## Подтверждённая карточка", "");
+  Object.entries(FIELD_LABELS).forEach(([name, label]) => {
+    lines.push(`### ${label}`, "", quote(task.fields[name]), "");
+  });
+  lines.push("## Что уточнить до начала работы", "");
+  if (task.missing.length) {
+    task.missing.forEach(name => lines.push(`- ${FIELD_LABELS[name]}: ${IMPROVEMENT_QUESTIONS[name]}`));
+  } else lines.push("Все поля рейтинга заполнены. Согласуйте детали с бизнесом перед началом работы.");
+  lines.push("", "---", "", "Команда отправляет идею и план через каталог Tulgalyq. Исполнителя выбирает бизнес.", "");
+  return lines.join("\n");
+}
+
+function downloadMissionPassport(task) {
+  const content = missionPassport(task);
+  const url = URL.createObjectURL(new Blob([content], {type:"text/markdown;charset=utf-8"}));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `tulgalyq-mission-${task.id.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 8)}.md`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 async function openTask(id) {
   selectedCatalogTask = await request(`/api/tasks/${id}?published=1`);
   const task = selectedCatalogTask;
   const detail = $("task-detail"); detail.replaceChildren(); detail.hidden = false;
   detail.append(el("span", "step-tag", task.topic), el("h2", "", task.quality_issues.title ? task.raw_description : (task.fields.title || task.raw_description)),
     el("p", "", `Рейтинг: ${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]} · ${task.rating_needs_review ? "ожидает перепроверки" : "подтверждено бизнесом"}`));
+  const exportActions = el("div", "detail-actions");
+  const exportButton = el("button", "secondary-button", "↓ Скачать паспорт миссии");
+  exportButton.type = "button";
+  exportButton.addEventListener("click", () => downloadMissionPassport(task));
+  exportActions.append(exportButton); detail.append(exportActions);
   const grid = el("div", "detail-grid");
   Object.entries(FIELD_LABELS).forEach(([key, label]) => {
     const row = el("div", "detail-field"); row.append(el("strong", "", label), el("p", "", task.fields[key] || "Не указано")); grid.append(row);
