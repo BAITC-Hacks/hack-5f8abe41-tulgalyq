@@ -19,6 +19,8 @@ import app
 
 class AppTest(unittest.TestCase):
     def setUp(self):
+        self.gemini_env = patch.dict(os.environ, {"GEMINI_API_KEY": ""})
+        self.gemini_env.start()
         self.temp = TemporaryDirectory()
         self.old_db = app.DB_PATH
         app.DB_PATH = Path(self.temp.name) / "test.sqlite3"
@@ -34,6 +36,7 @@ class AppTest(unittest.TestCase):
         self.thread.join()
         app.DB_PATH = self.old_db
         self.temp.cleanup()
+        self.gemini_env.stop()
 
     def api(self, path, method="GET", payload=None):
         body = json.dumps(payload or {}).encode() if method != "GET" else None
@@ -44,6 +47,21 @@ class AppTest(unittest.TestCase):
                 return response.status, json.load(response)
         except HTTPError as error:
             return error.code, json.load(error)
+
+    def test_local_env_loader_only_reads_known_settings_and_respects_process_env(self):
+        with TemporaryDirectory() as folder:
+            Path(folder, ".env").write_text(
+                "GEMINI_API_KEY=local-dummy\nOPENAI_MODEL='example-model'\nUNEXPECTED_SETTING=ignored\n",
+                encoding="utf-8",
+            )
+            with patch.object(app, "ROOT", Path(folder)), patch.dict(os.environ, {
+                    "GEMINI_API_KEY": "process-dummy", "UNEXPECTED_SETTING": ""
+            }):
+                os.environ.pop("OPENAI_MODEL", None)
+                app.load_local_env()
+                self.assertEqual(os.environ["GEMINI_API_KEY"], "process-dummy")
+                self.assertEqual(os.environ["OPENAI_MODEL"], "example-model")
+                self.assertEqual(os.environ["UNEXPECTED_SETTING"], "")
 
     def test_mobile_assets_and_navigation_are_served(self):
         with urlopen(self.base + "/") as response:
@@ -69,6 +87,8 @@ class AppTest(unittest.TestCase):
         self.assertIn('id="publish-success"', page)
         self.assertIn('id="publish-new-task"', page)
         self.assertIn('class="ai-safety-note"', page)
+        self.assertNotIn('<section class="hero">', page)
+        self.assertIn('КОНСТРУКТОР БИЗНЕС-ЗАДАЧ · ШАГ 01 / 03', page)
         self.assertIn('Черновик · требует уточнения · 0–39', page)
         self.assertIn('id="catalog-reset"', page)
         self.assertIn('id="score-details"', page)
@@ -259,6 +279,45 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(answer["questions"]), 3)
         self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["data"], "тест")
         self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["need"], "")
+
+    def test_gemini_questions_use_server_key_and_do_not_write_business_facts(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Очередь в школьной столовой слишком длинная"})
+        response = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "internal", "thought": True}, {"text": json.dumps({
+            "questions": [
+                {"field": "data", "text": "Какие замеры очереди уже доступны?"},
+                {"field": "success_criteria", "text": "Как вы измерите улучшение ожидания?"},
+                {"field": "expected_result", "text": "Что команда должна передать в итоге?"},
+            ]})}]}}]}
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-secret", "OPENAI_API_KEY": "openai-test"}), \
+                patch.object(app, "urlopen", return_value=BytesIO(json.dumps(response).encode())) as mocked:
+            self.assertEqual(self.api("/api/health")[1]["ai_provider"], "gemini")
+            code, answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST",
+                                    {"answers": {"need": "Сократить ожидание обеда"}})
+        sent_request = mocked.call_args.args[0]
+        sent = json.loads(sent_request.data)
+        self.assertIn("generativelanguage.googleapis.com", sent_request.full_url)
+        self.assertEqual(sent_request.get_header("X-goog-api-key"), "test-secret")
+        self.assertEqual(sent["systemInstruction"]["parts"][0]["text"], app.AI_INSTRUCTIONS)
+        self.assertEqual(sent["generationConfig"]["responseMimeType"], "application/json")
+        self.assertNotIn("need", sent["generationConfig"]["responseSchema"]["properties"]["questions"]["items"]["properties"]["field"]["enum"])
+        self.assertEqual(code, 200)
+        self.assertEqual(answer["source"], "gemini")
+        self.assertEqual(len(answer["questions"]), 3)
+        self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["need"], "")
+
+    def test_gemini_bad_answer_and_auth_error_fall_back(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
+        invalid = {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": "{}"}]}}]}
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-secret", "OPENAI_API_KEY": ""}):
+            with patch.object(app, "urlopen", return_value=BytesIO(json.dumps(invalid).encode())):
+                answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")[1]
+                self.assertEqual(answer["source"], "local")
+                self.assertEqual(answer["fallback_reason"], "api_unavailable")
+            with patch.object(app, "urlopen", side_effect=HTTPError(
+                    "https://generativelanguage.googleapis.com", 403, "API error", {}, None)):
+                answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")[1]
+                self.assertEqual(answer["fallback_reason"], "auth_failed")
+        self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["data"], "")
 
     def test_bad_ai_response_falls_back_without_changing_task(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Клиентам трудно выбрать школьный кружок"})

@@ -190,7 +190,7 @@ $("draft-form").addEventListener("submit",async (event)=>{
   event.preventDefault();
   try {
     const task = await request("/api/tasks",{method:"POST",body:JSON.stringify({description:$("description").value,topic:$("topic").value})});
-    updateTask(task); buildQuestions(); $("question-source").textContent = "Уточняющие вопросы по шаблону"; showStage("questions");
+    updateTask(task); buildQuestions(); showStage("questions"); refreshAiQuestions();
   } catch(error) { showNotice(error.message,true); }
 });
 $("questions-form").addEventListener("submit",async(event)=>{
@@ -558,22 +558,27 @@ async function addProgress(card, proposalId) {
 
 request("/api/health").then(status => {
   const button = $("ai-questions-button");
-  button.textContent = status.ai_enabled ? "✦ Спросить AI" : "↻ Локальные вопросы";
+  button.textContent = status.ai_enabled ? `✦ Спросить ${status.ai_provider === "gemini" ? "Gemini" : "AI"}` : "↻ Локальные вопросы";
   button.title = status.ai_setup_issue === "web_link"
-    ? "В OPENAI_API_KEY задана веб-ссылка. Нужен секретный API-ключ из OpenAI Platform."
+    ? "В переменной AI-ключа задана веб-ссылка. Нужен секретный API-ключ."
     : status.ai_enabled
       ? "AI предложит три вопроса; ответы останутся под вашим контролем"
-      : "Для живого AI нужен OPENAI_API_KEY на сервере. Сейчас работают локальные правила.";
+      : "Для живого AI нужен GEMINI_API_KEY или OPENAI_API_KEY на сервере. Сейчас работают локальные правила.";
 }).catch(() => {});
-$("ai-questions-button").addEventListener("click", async () => {
+async function refreshAiQuestions() {
+  if (!currentTask) return;
+  const taskId = currentTask.id;
   const button = $("ai-questions-button"); button.disabled = true;
   const typedAnswers = Object.fromEntries([...$("questions-list").querySelectorAll("textarea")].map(input => [input.dataset.field, input.value]));
   pendingQuestionAnswers = {...pendingQuestionAnswers, ...typedAnswers};
   $("question-source").textContent = "Готовим уточняющие вопросы…";
   try {
-    const result = await request(`/api/tasks/${currentTask.id}/ai-questions`, {
+    const result = await request(`/api/tasks/${taskId}/ai-questions`, {
       method:"POST", body:JSON.stringify({answers: pendingQuestionAnswers})
     });
+    if (currentTask?.id !== taskId || $("questions-section").hidden) return;
+    const latestAnswers = Object.fromEntries([...$("questions-list").querySelectorAll("textarea")].map(input => [input.dataset.field, input.value]));
+    pendingQuestionAnswers = {...pendingQuestionAnswers, ...latestAnswers};
     currentTask.questions = result.questions; buildQuestions(pendingQuestionAnswers);
     const fallbackLabels = {
       invalid_configuration: "Вместо API-ключа задана ссылка · показаны локальные вопросы",
@@ -581,11 +586,13 @@ $("ai-questions-button").addEventListener("click", async () => {
       rate_limited: "AI: достигнут лимит API · показаны локальные вопросы",
       api_unavailable: "AI недоступен · показаны локальные вопросы"
     };
-    $("question-source").textContent = result.source === "openai"
-      ? "Вопросы предложены AI · ответы проверяете вы"
+    $("question-source").textContent = result.source === "gemini" || result.source === "openai"
+      ? `Вопросы предложены ${result.source === "gemini" ? "Gemini" : "AI"} · ответы проверяете вы`
       : fallbackLabels[result.fallback_reason] || "Локальные вопросы · API не подключён";
   } catch (error) {
+    if (currentTask?.id !== taskId) return;
     $("question-source").textContent = "Не удалось обновить вопросы · ваши ответы сохранены";
     showNotice(error.message, true);
   } finally { button.disabled = false; }
-});
+}
+$("ai-questions-button").addEventListener("click", refreshAiQuestions);

@@ -3,7 +3,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 import json
@@ -15,6 +15,28 @@ import uuid
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+def load_local_env():
+    """Load only known server-side AI settings; process environment takes precedence."""
+    path = ROOT / ".env"
+    if not path.is_file():
+        return
+    allowed = {"GEMINI_API_KEY", "GEMINI_MODEL", "OPENAI_API_KEY", "OPENAI_MODEL"}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        if name in allowed:
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            os.environ.setdefault(name, value)
+
+
+load_local_env()
 DB_PATH = Path(os.getenv("MISSION100_DB_PATH", str(ROOT / "data" / "mission100.sqlite3")))
 FIELDS = (
     "title", "context", "need", "users", "data", "constraints",
@@ -55,6 +77,19 @@ def ai_key_state():
     if "://" in value or value.startswith(("www.", "platform.openai.com/", "chatgpt.com/")):
         return "web_link"
     return "configured"
+
+
+def ai_provider_state():
+    """Prefer Gemini when configured; never treat a website URL as a secret."""
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    gemini_state = "web_link" if "://" in gemini_key or gemini_key.startswith("www.") else (
+        "configured" if gemini_key else "missing")
+    if gemini_state == "configured":
+        return "gemini", "configured"
+    openai_state = ai_key_state()
+    if openai_state == "configured":
+        return "openai", "configured"
+    return None, "web_link" if "web_link" in (gemini_state, openai_state) else "missing"
 
 
 def connect():
@@ -205,15 +240,29 @@ def get_task(task_id, published=False):
     return task_from_row(row, published=published) if row else None
 
 
+def question_fields(task):
+    allowed = [field for field, _ in QUESTION_BANK
+               if quality_issue(field, task["fields"].get(field, ""))]
+    return allowed if len(allowed) >= 3 else [field for field, _ in QUESTION_BANK]
+
+
+def validate_ai_questions(questions, allowed):
+    if not isinstance(questions, list) or len(questions) != 3 or not all(isinstance(q, dict) for q in questions):
+        raise ValueError("AI вернул некорректные вопросы.")
+    if any(q.get("field") not in allowed or not isinstance(q.get("text"), str)
+           or not 10 <= len(q["text"].strip()) <= 240 or "?" not in q["text"] for q in questions):
+        raise ValueError("AI вернул некорректные вопросы.")
+    if len({q["field"] for q in questions}) != 3 or len({re.sub(r"\W+", "", q["text"].casefold()) for q in questions}) != 3:
+        raise ValueError("AI вернул некорректные вопросы.")
+    return [{"field": q["field"], "text": q["text"].strip()} for q in questions]
+
+
 def ai_questions(task):
     """Ask only questions; never synthesize or save unverified business facts."""
     if ai_key_state() != "configured":
         raise ValueError("AI не настроен: нужен секретный API-ключ, а не ссылка на страницу OpenAI.")
     key = os.environ["OPENAI_API_KEY"].strip()
-    allowed = [field for field, _ in QUESTION_BANK
-               if quality_issue(field, task["fields"].get(field, ""))]
-    if len(allowed) < 3:
-        allowed = [field for field, _ in QUESTION_BANK]
+    allowed = question_fields(task)
     schema = {
         "type": "object", "properties": {"questions": {"type": "array", "items": {
             "type": "object", "properties": {
@@ -242,26 +291,56 @@ def ai_questions(task):
         texts = [part["text"] for item in result.get("output", []) if item.get("type") == "message"
                  for part in item.get("content", []) if part.get("type") == "output_text"]
         parsed = json.loads("".join(texts))
-        questions = parsed["questions"]
-        if not isinstance(questions, list) or len(questions) != 3 or not all(isinstance(q, dict) for q in questions):
-            raise ValueError("AI вернул некорректные вопросы.")
-        if any(q.get("field") not in allowed or not isinstance(q.get("text"), str)
-               or not 10 <= len(q["text"].strip()) <= 240 or "?" not in q["text"] for q in questions):
-            raise ValueError("AI вернул некорректные вопросы.")
-        if len({q["field"] for q in questions}) != 3 or len({re.sub(r"\W+", "", q["text"].casefold()) for q in questions}) != 3:
-            raise ValueError("AI вернул некорректные вопросы.")
-        return [{"field": q["field"], "text": q["text"].strip()} for q in questions]
+        return validate_ai_questions(parsed["questions"], allowed)
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
         raise ValueError("AI сейчас недоступен. Используйте обычные уточняющие вопросы.") from error
 
 
+def gemini_questions(task):
+    """Google Gemini proposes questions only; business facts remain human-authored."""
+    allowed = question_fields(task)
+    schema = {"type": "object", "properties": {"questions": {"type": "array", "items": {
+        "type": "object", "properties": {
+            "field": {"type": "string", "enum": allowed}, "text": {"type": "string"}
+        }, "required": ["field", "text"]
+    }}}, "required": ["questions"]}
+    model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", model):
+        raise ValueError("Некорректное имя модели Gemini.")
+    payload = {
+        "systemInstruction": {"parts": [{"text": AI_INSTRUCTIONS}]},
+        "contents": [{"role": "user", "parts": [{"text": json.dumps({
+            "description": task["raw_description"], "fields": task["fields"]
+        }, ensure_ascii=False)}]}],
+        "generationConfig": {"responseMimeType": "application/json", "responseSchema": schema,
+                             "maxOutputTokens": 700},
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{quote(model)}:generateContent"
+    request = Request(url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                      headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"].strip(),
+                               "Content-Type": "application/json"})
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.load(response)
+        candidates = result["candidates"]
+        if len(candidates) != 1 or candidates[0].get("finishReason") != "STOP":
+            raise ValueError("Gemini не завершил ответ.")
+        content = candidates[0]["content"]
+        output = "".join(part["text"] for part in content["parts"]
+                         if "text" in part and not part.get("thought"))
+        return validate_ai_questions(json.loads(output)["questions"], allowed)
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError, AttributeError, IndexError) as error:
+        raise ValueError("Gemini сейчас недоступен. Используйте обычные уточняющие вопросы.") from error
+
+
 def question_response(task):
-    key_state = ai_key_state()
+    provider, key_state = ai_provider_state()
     if key_state != "configured":
         return {"questions": task["questions"], "source": "local",
                 "fallback_reason": "invalid_configuration" if key_state == "web_link" else "not_configured"}
     try:
-        return {"questions": ai_questions(task), "source": "openai"}
+        return {"questions": gemini_questions(task) if provider == "gemini" else ai_questions(task),
+                "source": provider}
     except ValueError as error:
         reason = "api_unavailable"
         if isinstance(error.__cause__, HTTPError):
@@ -435,8 +514,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/app.js":
             return self.serve_file("app.js", "text/javascript; charset=utf-8")
         if path == "/api/health":
-            key_state = ai_key_state()
+            provider, key_state = ai_provider_state()
             payload = {"ok": True, "ai_enabled": key_state == "configured"}
+            if provider:
+                payload["ai_provider"] = provider
             if key_state == "web_link":
                 payload["ai_setup_issue"] = "web_link"
             return self.json_response(200, payload)
