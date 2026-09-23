@@ -130,7 +130,7 @@ function showView(view) {
   $("task-detail").hidden = true;
   $("current-view-label").textContent = {constructor:"Конструктор задачи",workspace:"Задачи бизнеса",catalog:"Каталог задач",proposals:"Отклики команд"}[view];
   if (view === "workspace") loadWorkspace();
-  if (view === "catalog") loadCatalog();
+  if (view === "catalog") { loadCatalog(); loadRecommendations(); }
   if (view === "proposals") loadProposals();
   window.scrollTo(0, 0);
 }
@@ -213,13 +213,39 @@ async function loadCatalog() {
     });
   } catch (error) { $("catalog-list").textContent = error.message; }
 }
+async function loadRecommendations() {
+  const select = $("recommendation-team");
+  const list = $("recommendations-list");
+  try {
+    const selected = select.value;
+    const teams = await request("/api/teams");
+    select.replaceChildren(new Option("Выберите команду", ""));
+    teams.forEach(team => select.append(new Option(team.name, team.id)));
+    select.value = selected;
+    list.replaceChildren();
+    if (!select.value) return;
+    const matches = await request(`/api/teams/${encodeURIComponent(select.value)}/recommendations`);
+    if (!matches.length) {
+      list.append(el("p", "", "Совпадений пока нет. Укажите интересы команды или изучите весь каталог ниже."));
+      return;
+    }
+    matches.forEach(match => {
+      const card = el("article", "recommendation-card");
+      card.append(el("strong", "", match.title), el("span", "", `${match.score}/100 · совпало: ${match.matched_terms.join(", ")}`));
+      const button = el("button", "secondary-button", "Открыть задачу →"); button.type = "button";
+      button.addEventListener("click", () => openTask(match.task_id));
+      card.append(button); list.append(card);
+    });
+  } catch (error) { list.textContent = error.message; }
+}
+$("recommendation-team").addEventListener("change", loadRecommendations);
 $("catalog-topic").addEventListener("change", loadCatalog);
 $("catalog-readiness").addEventListener("change", loadCatalog);
 $("catalog-sort").addEventListener("change", loadCatalog);
 $("seed-button").addEventListener("click", async () => {
   try {
     const result = await request("/api/demo/seed", {method:"POST", body:"{}"});
-    await loadCatalog();
+    await loadCatalog(); await loadRecommendations();
     alert(result.created ? "Добавлены 5 синтетических карточек, 5 черновиков, 5 команд и 5 откликов." : "В базе уже есть задачи — демо-данные не добавлены.");
   } catch (error) { alert(error.message); }
 });

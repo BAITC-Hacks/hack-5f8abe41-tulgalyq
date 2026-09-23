@@ -92,6 +92,12 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(self.api("/api/proposals")[1]), 5)
         self.assertTrue(all(team["interests"] and team["technologies"] for team in self.api("/api/teams")[1]))
         self.assertTrue(all(item["deadline"] and item["prototype_url"] for item in self.api("/api/proposals")[1]))
+        code, matches = self.api("/api/teams/demo-team-1/recommendations")
+        self.assertEqual(code, 200)
+        self.assertEqual(matches[0]["task_id"], "demo-card-1")
+        self.assertIn("образование", matches[0]["matched_terms"])
+        self.assertEqual(self.api("/api/teams/unknown/recommendations")[0], 404)
+        self.assertEqual(len(self.api("/api/tasks")[1]), 5)
         workspace = self.api("/api/workspace/tasks")[1]
         self.assertEqual(len(workspace), 11)
         self.assertEqual(sum(task["status"] == "draft" for task in workspace), 6)

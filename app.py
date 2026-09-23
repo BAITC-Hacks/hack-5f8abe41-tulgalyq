@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 import json
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -204,6 +205,33 @@ def list_workspace_tasks():
     return tasks
 
 
+def recommend_tasks(team_id):
+    with connect() as db:
+        team = db.execute("SELECT interests, skills, technologies FROM teams WHERE id = ?", (team_id,)).fetchone()
+    if not team:
+        return None
+    keywords = []
+    for source in ("interests", "skills", "technologies"):
+        keywords.extend(word.casefold() for word in re.findall(r"[^\W_]{4,}", team[source], re.UNICODE))
+    if not keywords:
+        return []
+    ranked = []
+    for task in list_tasks():
+        if task["confirmed_score"] < 40:
+            continue  # Low-score tasks remain in the catalog, but are not recommended.
+        description = " ".join([task["topic"], task["fields"]["title"], task["fields"]["need"],
+                                task["fields"]["context"], task["fields"]["expected_result"]]).casefold()
+        words = set(re.findall(r"[^\W_]{4,}", description, re.UNICODE))
+        matches = sorted({word for word in keywords if word in words})
+        if matches:
+            ranked.append((len(matches), task["confirmed_score"], {
+                "task_id": task["id"], "title": task["fields"]["title"], "topic": task["topic"],
+                "score": task["confirmed_score"], "matched_terms": matches,
+            }))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in ranked[:3]]
+
+
 def list_proposals(task_id=None):
     with connect() as db:
         if task_id:
@@ -320,6 +348,10 @@ class Handler(BaseHTTPRequestHandler):
                     LEFT JOIN progress pr ON pr.proposal_id = p.id
                     GROUP BY t.id ORDER BY points DESC, t.name""")]
             return self.json_response(200, teams)
+        if path.startswith("/api/teams/") and path.endswith("/recommendations"):
+            result = recommend_tasks(path.split("/")[3])
+            return self.json_response(200 if result is not None else 404,
+                                      result if result is not None else {"error": "Команда не найдена."})
         if path.startswith("/api/proposals/") and path.endswith("/progress"):
             proposal_id = path.split("/")[3]
             with connect() as db:
