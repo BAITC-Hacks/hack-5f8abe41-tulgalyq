@@ -325,6 +325,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_file("ai.css", "text/css; charset=utf-8")
         if path == "/workspace.css":
             return self.serve_file("workspace.css", "text/css; charset=utf-8")
+        if path == "/mobile.css":
+            return self.serve_file("mobile.css", "text/css; charset=utf-8")
         if path == "/app.js":
             return self.serve_file("app.js", "text/javascript; charset=utf-8")
         if path == "/api/health":

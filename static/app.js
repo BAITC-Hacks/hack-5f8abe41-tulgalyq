@@ -25,6 +25,7 @@ function showNotice(message, error=false) {
 }
 function showStage(name) {
   for (const stage of ["draft","questions","card"]) $(stage+"-section").hidden = stage !== name;
+  document.body.dataset.stage = name;
   $("notice").hidden = true;
   window.scrollTo({top:0,behavior:"smooth"});
 }
@@ -126,6 +127,12 @@ function showView(view) {
     $(name+"-view").hidden = name !== view;
     document.querySelector(`[data-view="${name}"]`).classList.toggle("active", name === view);
   }
+  document.querySelectorAll("[data-mobile-view]").forEach(link => {
+    const active = link.dataset.mobileView === view;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
   $("notice").hidden = true;
   $("task-detail").hidden = true;
   $("current-view-label").textContent = {constructor:"Конструктор задачи",workspace:"Задачи бизнеса",catalog:"Каталог задач",proposals:"Отклики команд"}[view];
@@ -136,6 +143,13 @@ function showView(view) {
 }
 window.addEventListener("hashchange", () => showView(["workspace", "catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor"));
 showView(["workspace", "catalog", "proposals"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "constructor");
+const scoreBreakpoint = window.matchMedia("(max-width: 700px)");
+function syncScoreDetails(event) {
+  $("score-details").open = !event.matches;
+  $("recommendation-details").open = !event.matches;
+}
+syncScoreDetails(scoreBreakpoint);
+scoreBreakpoint.addEventListener("change", syncScoreDetails);
 
 async function loadWorkspace() {
   try {

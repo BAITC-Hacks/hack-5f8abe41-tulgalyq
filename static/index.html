@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/extra.css">
   <link rel="stylesheet" href="/ai.css">
   <link rel="stylesheet" href="/workspace.css">
+  <link rel="stylesheet" href="/mobile.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -32,6 +33,7 @@
 
     <main>
       <header class="topbar">
+        <a class="mobile-brand" href="#constructor" aria-label="Миссия 100 — конструктор"><span class="mobile-brand-mark" aria-hidden="true">✳</span><span>МИССИЯ <strong>100</strong></span></a>
         <div class="breadcrumbs">Платформа <span>/</span> <span id="current-view-label">Конструктор задачи</span></div>
         <div class="topbar-right"><span class="status-dot"></span> Демо-пространство <span class="avatar">Б</span></div>
       </header>
@@ -68,7 +70,7 @@
         <section id="card-section" class="stage-card" hidden>
           <div class="stage-heading"><div><span class="step-tag">ШАГ 03 / 03</span><h2>Проверьте карточку</h2><p>Система сохранила только введённые вами сведения. Заполните пропуски и подтвердите результат.</p></div><span class="stage-icon">✓</span></div>
           <div class="editor-layout"><form id="card-form"><div id="card-fields"></div><div class="actions"><button class="secondary-button" type="submit">Сохранить изменения</button><button class="primary-button" id="confirm-button" type="button">Подтвердить карточку <span>✓</span></button></div></form>
-          <aside class="score-panel"><div class="score-label">ГОТОВНОСТЬ ЗАДАЧИ</div><div class="score-circle"><strong id="score-number">0</strong><span>/ 100</span></div><div class="score-state" id="score-state">Черновик</div><p id="score-explain">Баллы начисляются после вашего подтверждения.</p><div class="score-rule"></div><div class="score-label">РАЗБИВКА ПО ПОЛЯМ</div><div id="breakdown-list" class="breakdown-list"></div><div class="score-rule"></div><div class="score-label">ПУТЬ К 100 БАЛЛАМ</div><div id="missing-list" class="missing-list"></div></aside></div>
+          <aside class="score-panel"><div class="score-label">ГОТОВНОСТЬ ЗАДАЧИ</div><div class="score-overview"><div class="score-circle"><strong id="score-number">0</strong><span>/ 100</span></div><div class="score-copy"><div class="score-state" id="score-state">Черновик</div><p id="score-explain">Баллы начисляются после вашего подтверждения.</p></div></div><details id="score-details" open><summary>Как считаются баллы и что улучшить <span aria-hidden="true">⌄</span></summary><div class="score-rule"></div><div class="score-label">РАЗБИВКА ПО ПОЛЯМ</div><div id="breakdown-list" class="breakdown-list"></div><div class="score-rule"></div><div class="score-label">ПУТЬ К 100 БАЛЛАМ</div><div id="missing-list" class="missing-list"></div></details></aside></div>
         </section>
       </div>
       <div class="content" id="workspace-view" hidden>
@@ -78,7 +80,7 @@
       </div>
       <div class="content" id="catalog-view" hidden>
         <section class="page-intro"><span class="step-tag">ОТКРЫТЫЕ ВОЗМОЖНОСТИ</span><h1>Каталог миссий</h1><p>Подтверждённые задачи сортируются по рейтингу, но низкий балл не скрывает задачу и не мешает команде откликнуться.</p></section>
-        <section class="recommendations-panel" aria-label="Подбор задач"><div><span class="step-tag">ДЛЯ КОМАНД</span><h2>Миссии по интересам</h2><p>Подбор по совпадению слов в интересах, навыках и описании задач. Это подсказка, не автоматическое назначение — весь каталог доступен ниже.</p></div><label>КОМАНДА <select id="recommendation-team"><option value="">Выберите команду</option></select></label><div id="recommendations-list" class="recommendations-list" aria-live="polite"></div></section>
+        <section class="recommendations-panel" aria-label="Подбор задач"><details id="recommendation-details" open><summary>✦ Подобрать миссию по интересам <span aria-hidden="true">⌄</span></summary><div class="recommendations-body"><div><span class="step-tag">ДЛЯ КОМАНД</span><h2>Миссии по интересам</h2><p>Подбор по совпадению слов в интересах, навыках и описании задач. Это подсказка, не автоматическое назначение — весь каталог доступен ниже.</p></div><label>КОМАНДА <select id="recommendation-team"><option value="">Выберите команду</option></select></label><div id="recommendations-list" class="recommendations-list" aria-live="polite"></div></div></details></section>
         <div class="toolbar"><label>ТЕМА <select id="catalog-topic"><option value="">Все темы</option><option>Образование</option><option>Общепит</option><option>Здравоохранение</option><option>Госуслуги</option><option>Финансы</option><option>Другое</option></select></label><label>ГОТОВНОСТЬ <select id="catalog-readiness"><option value="">Любая</option><option value="low">Нужно уточнить · 0–39</option><option value="medium">Рабочая · 40–69</option><option value="high">Готовая · 70–89</option><option value="priority">Приоритетная · 90–100</option></select></label><label>СОРТИРОВКА <select id="catalog-sort"><option value="rating">По рейтингу</option><option value="newest">Новые сначала</option></select></label><button class="secondary-button" id="seed-button" type="button">Добавить демо-данные</button></div>
         <div id="catalog-list" class="catalog-grid"></div>
         <section id="task-detail" class="stage-card" hidden></section>
@@ -91,6 +93,6 @@
       </div>
     </main>
   </div>
-  <nav class="mobile-nav" aria-label="Разделы на телефоне"><a href="#constructor">Создать</a><a href="#workspace">Миссии</a><a href="#catalog">Каталог</a><a href="#proposals">Отклики</a></nav>
+  <nav class="mobile-nav" aria-label="Разделы на телефоне"><a href="#constructor" data-mobile-view="constructor"><span aria-hidden="true">✚</span><span>Создать</span></a><a href="#workspace" data-mobile-view="workspace"><span aria-hidden="true">◫</span><span>Миссии</span></a><a href="#catalog" data-mobile-view="catalog"><span aria-hidden="true">▦</span><span>Каталог</span></a><a href="#proposals" data-mobile-view="proposals"><span aria-hidden="true">↗</span><span>Отклики</span></a></nav>
 </body>
 </html>

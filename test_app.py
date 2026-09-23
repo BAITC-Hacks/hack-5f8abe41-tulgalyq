@@ -44,6 +44,16 @@ class AppTest(unittest.TestCase):
         except HTTPError as error:
             return error.code, json.load(error)
 
+    def test_mobile_assets_and_navigation_are_served(self):
+        with urlopen(self.base + "/") as response:
+            page = response.read().decode("utf-8")
+        with urlopen(self.base + "/mobile.css") as response:
+            mobile_css = response.read().decode("utf-8")
+        self.assertIn('href="/mobile.css"', page)
+        self.assertIn('data-mobile-view="catalog"', page)
+        self.assertIn('id="score-details"', page)
+        self.assertIn(".mobile-nav a.active", mobile_css)
+
     def test_full_flow_and_publication_boundary(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в столовой", "topic": "Общепит"})
         task_id = task["id"]
