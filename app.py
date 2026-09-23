@@ -35,6 +35,15 @@ QUESTION_BANK = (
     ("constraints", "Какие есть сроки, технические ограничения или условия доступа?"),
     ("interaction_format", "Как команда сможет консультироваться с вами и получать обратную связь?"),
 )
+AI_INSTRUCTIONS = (
+    "Ты редактор бизнес-задач. На русском языке задай ровно 3 разных "
+    "конкретных уточняющих вопроса по исходному описанию и текущей карточке. "
+    "Учитывай уже заполненные поля: спрашивай о неизвестном или о конкретизации "
+    "расплывчатого ответа, не повторяй уже известный факт. Задавай открытые вопросы "
+    "без предположений о сроках, цифрах, людях или ресурсах, которых нет во входных данных. "
+    "Не утверждай неуказанные факты, не придумывай данные и не заполняй карточку за бизнес. "
+    "Каждый вопрос должен соответствовать своему полю и не повторять другие вопросы."
+)
 DB_LOCK = threading.Lock()
 
 
@@ -204,14 +213,10 @@ def ai_questions(task):
     }
     payload = {
         "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        "instructions": ("Ты редактор бизнес-задач. На русском языке задай ровно 3 разных "
-            "конкретных уточняющих вопроса по исходному описанию и текущей карточке. "
-            "Учитывай уже заполненные поля: спрашивай о неизвестном или о конкретизации "
-            "расплывчатого ответа, не повторяй уже известный факт. Не утверждай неуказанные факты, "
-            "не придумывай данные и не заполняй карточку за бизнес. Каждый вопрос должен "
-            "соответствовать своему полю и не повторять другие вопросы."),
+        "instructions": AI_INSTRUCTIONS,
         "input": json.dumps({"description": task["raw_description"], "fields": task["fields"]}, ensure_ascii=False),
         "text": {"format": {"type": "json_schema", "name": "clarifying_questions", "strict": True, "schema": schema}},
+        "max_output_tokens": 500,
         "store": False,
     }
     request = Request("https://api.openai.com/v1/responses", data=json.dumps(payload).encode("utf-8"),
@@ -219,14 +224,21 @@ def ai_questions(task):
     try:
         with urlopen(request, timeout=20) as response:
             result = json.load(response)
+        if result.get("status") != "completed":
+            raise ValueError("AI не завершил ответ.")
+        if any(part.get("type") == "refusal" for item in result.get("output", [])
+               if item.get("type") == "message" for part in item.get("content", [])):
+            raise ValueError("AI отказался отвечать.")
         texts = [part["text"] for item in result.get("output", []) if item.get("type") == "message"
                  for part in item.get("content", []) if part.get("type") == "output_text"]
         parsed = json.loads("".join(texts))
         questions = parsed["questions"]
-        if len(questions) != 3 or len({q["field"] for q in questions}) != 3:
+        if not isinstance(questions, list) or len(questions) != 3 or not all(isinstance(q, dict) for q in questions):
             raise ValueError("AI вернул некорректные вопросы.")
-        if any(q["field"] not in allowed or not isinstance(q["text"], str)
-               or not 10 <= len(q["text"].strip()) <= 240 for q in questions):
+        if any(q.get("field") not in allowed or not isinstance(q.get("text"), str)
+               or not 10 <= len(q["text"].strip()) <= 240 or "?" not in q["text"] for q in questions):
+            raise ValueError("AI вернул некорректные вопросы.")
+        if len({q["field"] for q in questions}) != 3 or len({re.sub(r"\W+", "", q["text"].casefold()) for q in questions}) != 3:
             raise ValueError("AI вернул некорректные вопросы.")
         return [{"field": q["field"], "text": q["text"].strip()} for q in questions]
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
@@ -238,8 +250,14 @@ def question_response(task):
         return {"questions": task["questions"], "source": "local", "fallback_reason": "not_configured"}
     try:
         return {"questions": ai_questions(task), "source": "openai"}
-    except ValueError:
-        return {"questions": task["questions"], "source": "local", "fallback_reason": "api_unavailable"}
+    except ValueError as error:
+        reason = "api_unavailable"
+        if isinstance(error.__cause__, HTTPError):
+            if error.__cause__.code in (401, 403):
+                reason = "auth_failed"
+            elif error.__cause__.code == 429:
+                reason = "rate_limited"
+        return {"questions": task["questions"], "source": "local", "fallback_reason": reason}
 
 
 def list_tasks(topic="", sort="rating", readiness=""):

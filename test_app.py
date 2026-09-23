@@ -5,8 +5,9 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import quote
 import json
 import os
 import sqlite3
@@ -142,6 +143,11 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(ratings), 5)
         self.assertEqual(ratings, sorted(ratings, reverse=True))
         self.assertLess(ratings[-1], ratings[0])
+        cards = self.api("/api/tasks?sort=rating")[1]
+        for card in cards:
+            self.assertEqual(set(card["fields"]), set(app.FIELDS))
+            self.assertEqual(card["confirmed_score"], app.score_fields(card["fields"])[0])
+        self.assertEqual(len(self.api("/api/tasks?topic=" + quote("Образование"))[1]), 1)
         self.assertEqual(len(self.api("/api/tasks?readiness=low")[1]), 1)
         self.assertEqual(len(self.api("/api/tasks?readiness=medium")[1]), 1)
         self.assertEqual(len(self.api("/api/tasks?readiness=high")[1]), 1)
@@ -163,6 +169,23 @@ class AppTest(unittest.TestCase):
         self.assertEqual([task["preview_score"] for task in demo_drafts],
                          sorted({task["preview_score"] for task in demo_drafts}))
         self.assertTrue(all(task["topic"] for task in demo_drafts))
+
+    def test_business_can_select_multiple_teams_without_auto_assignment(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Школьникам нужен удобный каталог кружков"})
+        self.api(f"/api/tasks/{task['id']}/confirm", "POST")
+        proposals = []
+        for name in ("Исследователи", "Разработчики"):
+            _, team = self.api("/api/teams", "POST", {"name": name, "skills": "Дизайн"})
+            _, proposal = self.api("/api/proposals", "POST", {"task_id": task["id"], "team_id": team["id"],
+                "idea": "Сделаем удобный каталог кружков", "plan": "Изучим потребности и соберём прототип"})
+            proposals.append(proposal["id"])
+        self.assertEqual({p["status"] for p in self.api("/api/proposals")[1]}, {"pending"})
+        for proposal_id in proposals:
+            self.api(f"/api/proposals/{proposal_id}/decision", "POST", {"decision": "selected"})
+        self.assertEqual([p["status"] for p in self.api("/api/proposals")[1]], ["selected", "selected"])
+        self.api(f"/api/proposals/{proposals[0]}/decision", "POST", {"decision": "rejected"})
+        self.assertEqual({p["id"]: p["status"] for p in self.api("/api/proposals")[1]},
+                         {proposals[0]: "rejected", proposals[1]: "selected"})
 
     def test_readiness_boundaries_match_hackathon_case(self):
         self.assertEqual(app.WEIGHTS, {
@@ -214,7 +237,7 @@ class AppTest(unittest.TestCase):
     def test_ai_questions_keep_card_under_user_control(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Очередь в школьной столовой слишком длинная"})
         self.api(f"/api/tasks/{task['id']}", "PATCH", {"fields": {"users": "Ученики школы", "data": "тест"}})
-        result = {"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"questions": [
+        result = {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"questions": [
             {"field": "data", "text": "Есть ли замеры времени ожидания?"},
             {"field": "success_criteria", "text": "Как измерить успешное сокращение очереди?"},
             {"field": "expected_result", "text": "Какой результат должна получить школа?"},
@@ -224,6 +247,9 @@ class AppTest(unittest.TestCase):
             code, answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST",
                                     {"answers": {"need": typed_need}})
         sent = json.loads(mocked.call_args.args[0].data)
+        self.assertEqual(sent["instructions"], app.AI_INSTRUCTIONS)
+        self.assertFalse(sent["store"])
+        self.assertEqual(sent["text"]["format"]["type"], "json_schema")
         self.assertEqual(json.loads(sent["input"])["fields"]["users"], "Ученики школы")
         self.assertEqual(json.loads(sent["input"])["fields"]["need"], typed_need)
         self.assertNotIn("users", sent["text"]["format"]["schema"]["properties"]["questions"]["items"]["properties"]["field"]["enum"])
@@ -236,7 +262,7 @@ class AppTest(unittest.TestCase):
 
     def test_bad_ai_response_falls_back_without_changing_task(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Клиентам трудно выбрать школьный кружок"})
-        invalid = {"output": [{"type": "message", "content": [{"type": "output_text",
+        invalid = {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text",
             "text": json.dumps({"questions": [{"field": "data", "text": "Есть ли данные?"}]})}]}]}
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}), patch.object(app, "urlopen", return_value=BytesIO(json.dumps(invalid).encode())):
             code, answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")
@@ -245,6 +271,34 @@ class AppTest(unittest.TestCase):
         self.assertEqual(answer["fallback_reason"], "api_unavailable")
         self.assertEqual(len(answer["questions"]), 3)
         self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["data"], "")
+
+    def test_incomplete_refused_repeated_and_network_ai_answers_use_local_questions(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
+        repeated = {"questions": [
+            {"field": field, "text": "Какие данные доступны для команды?"}
+            for field in ("need", "data", "success_criteria")
+        ]}
+        responses = [
+            {"status": "incomplete", "output": []},
+            {"status": "completed", "output": [{"type": "message", "content": [{"type": "refusal", "refusal": "Нет"}]}]},
+            {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps(repeated)}]}]},
+        ]
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            for index, response in enumerate(responses):
+                with self.subTest(case=index), patch.object(
+                        app, "urlopen", return_value=BytesIO(json.dumps(response).encode())):
+                    code, answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")
+                    self.assertEqual(code, 200)
+                    self.assertEqual(answer["source"], "local")
+                    self.assertEqual(answer["fallback_reason"], "api_unavailable")
+            with patch.object(app, "urlopen", side_effect=URLError("offline")):
+                self.assertEqual(self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")[1]["source"], "local")
+            for http_code, reason in ((401, "auth_failed"), (429, "rate_limited")):
+                with self.subTest(http_code=http_code), patch.object(app, "urlopen", side_effect=HTTPError(
+                        "https://api.openai.com/v1/responses", http_code, "API error", {}, None)):
+                    answer = self.api(f"/api/tasks/{task['id']}/ai-questions", "POST")[1]
+                    self.assertEqual(answer["fallback_reason"], reason)
+        self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["need"], "")
 
     def test_local_questions_when_key_is_missing(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})

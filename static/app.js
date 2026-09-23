@@ -573,11 +573,14 @@ $("ai-questions-button").addEventListener("click", async () => {
       method:"POST", body:JSON.stringify({answers: pendingQuestionAnswers})
     });
     currentTask.questions = result.questions; buildQuestions(pendingQuestionAnswers);
+    const fallbackLabels = {
+      auth_failed: "AI: доступ к API отклонён · показаны локальные вопросы",
+      rate_limited: "AI: достигнут лимит API · показаны локальные вопросы",
+      api_unavailable: "AI недоступен · показаны локальные вопросы"
+    };
     $("question-source").textContent = result.source === "openai"
       ? "Вопросы предложены AI · ответы проверяете вы"
-      : result.fallback_reason === "api_unavailable"
-        ? "AI недоступен · показаны локальные вопросы"
-        : "Локальные вопросы · API не подключён";
+      : fallbackLabels[result.fallback_reason] || "Локальные вопросы · API не подключён";
   } catch (error) {
     $("question-source").textContent = "Не удалось обновить вопросы · ваши ответы сохранены";
     showNotice(error.message, true);
