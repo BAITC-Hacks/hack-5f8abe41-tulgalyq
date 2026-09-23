@@ -16,6 +16,10 @@
   align-items: start;
 }
 
+.field-hint { display: block; margin-top: 6px; color: #a35d3b; font-size: 11px; line-height: 1.4; }
+.field-hint[hidden] { display: none; }
+.field-row [aria-invalid="true"] { border-color: #d9a487; background: #fffbf8; }
+
 @media (max-width: 700px) {
   body {
     padding-bottom: 0;

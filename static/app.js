@@ -6,12 +6,31 @@ const FIELD_LABELS = {
   contact: "Контакт бизнеса", interaction_format: "Формат взаимодействия"
 };
 const WEIGHTS = {context:10,need:10,data:20,expected_result:15,success_criteria:15,constraints:10,users:10,contact:5,interaction_format:5};
+const PLACEHOLDERS = new Set(["тест","test","нет","незнаю","потом","заполнить","xxx","asdf","qwerty","йцукен"]);
 const READINESS_LABELS = {low:"Нужно уточнить",medium:"Рабочая",high:"Готовая",priority:"Приоритетная"};
 let currentTask = null;
 let selectedCatalogTask = null;
 let proposalTaskFilterValue = "";
 const $ = (id) => document.getElementById(id);
 const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value !== undefined) node.textContent = value; return node; };
+
+function qualityIssue(name, value) {
+  const text = value.trim();
+  if (!text) return "Поле пока пустое.";
+  const compact = [...text].filter(char => /[\p{L}\p{N}]/u.test(char)).join("").toLocaleLowerCase("ru");
+  const tokens = (text.toLocaleLowerCase("ru").match(/[\p{L}\p{N}_]+/gu) || []);
+  if (compact.length < 4 || PLACEHOLDERS.has(compact) || new Set(compact).size === 1 ||
+      (tokens.length > 1 && new Set(tokens).size === 1)) return "Замените заглушку или повторы конкретными сведениями.";
+  if (name === "contact") {
+    const hasEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text);
+    const hasHandle = /^@[\p{L}\p{N}_.]{4,}$/u.test(text);
+    const hasPhone = (text.match(/\p{N}/gu) || []).length >= 7;
+    let hasLink = false;
+    try { const url = new URL(text); hasLink = ["https:","http:"].includes(url.protocol) && Boolean(url.hostname); } catch {}
+    if (!hasEmail && !hasHandle && !hasPhone && !hasLink) return "Укажите email, @ник, ссылку или телефон минимум из 7 цифр.";
+  } else if (!/\p{L}/u.test(text)) return "Опишите сведения словами, а не только цифрами или символами.";
+  return null;
+}
 
 async function request(path, options = {}) {
   const response = await fetch(path, {headers:{"Content-Type":"application/json"}, ...options});
@@ -49,7 +68,9 @@ function buildCard() {
     const input = ["title","contact","interaction_format"].includes(name) ? document.createElement("input") : document.createElement("textarea");
     input.id = "field-"+name; input.name = name; input.value = currentTask.fields[name] || "";
     input.addEventListener("input", updatePreview);
-    row.append(label,input); container.append(row);
+    const hint = el("small", "field-hint"); hint.id = "hint-"+name; hint.hidden = true;
+    input.setAttribute("aria-describedby", hint.id);
+    row.append(label,input,hint); container.append(row);
   });
   updatePreview();
 }
@@ -58,26 +79,35 @@ function fieldsFromForm() {
 }
 function updatePreview() {
   const fields = fieldsFromForm();
-  const preview = Object.entries(WEIGHTS).reduce((sum,[name,weight])=>sum+(fields[name]?weight:0),0);
-  const confirmed = currentTask.status === "confirmed" && !currentTask.needs_confirmation && JSON.stringify(fields) === JSON.stringify(currentTask.fields);
+  const issues = Object.fromEntries(Object.keys(FIELD_LABELS).map(name => [name, qualityIssue(name, fields[name])]));
+  const preview = Object.entries(WEIGHTS).reduce((sum,[name,weight])=>sum+(issues[name] ? 0 : weight),0);
+  Object.keys(FIELD_LABELS).forEach(name => {
+    const hint = $("hint-"+name);
+    hint.textContent = fields[name] && issues[name] ? issues[name] : "";
+    hint.hidden = !hint.textContent;
+    $("field-"+name).setAttribute("aria-invalid", hint.hidden ? "false" : "true");
+  });
+  const confirmed = currentTask.status === "confirmed" && !currentTask.needs_confirmation && !currentTask.rating_needs_review && JSON.stringify(fields) === JSON.stringify(currentTask.fields);
   $("score-number").textContent = confirmed ? currentTask.confirmed_score : preview;
   $("score-state").textContent = confirmed ? "Подтверждено" : "Возможный рейтинг";
   $("score-explain").textContent = confirmed
     ? "Баллы начислены за заполненные и подтверждённые сведения."
-    : "Это предварительный результат. Баллы начислятся после подтверждения.";
+    : currentTask.rating_needs_review
+      ? `Опубликовано ${currentTask.confirmed_score}/100 по прежним правилам. Подтвердите карточку, чтобы пересчитать рейтинг.`
+      : "Это предварительный результат. Баллы начислятся после подтверждения.";
   const breakdown = $("breakdown-list"); breakdown.replaceChildren();
   Object.entries(WEIGHTS).forEach(([name,weight]) => {
-    const filled = Boolean(fields[name]);
+    const filled = !issues[name];
     const row = el("div", "breakdown-item" + (filled ? "" : " missing"));
     row.append(el("span", "", FIELD_LABELS[name]), el("b", "", filled ? (confirmed ? `${weight}/${weight}` : `+${weight} после подтверждения`) : `0/${weight}`));
     breakdown.append(row);
   });
   const missing = $("missing-list"); missing.replaceChildren();
-  const entries = Object.entries(WEIGHTS).filter(([name])=>!fields[name]);
+  const entries = Object.entries(WEIGHTS).filter(([name])=>issues[name]);
   if (!entries.length) missing.textContent = "Все поля рейтинга заполнены ✓";
   entries.forEach(([name,weight])=>{
     const row = document.createElement("div"); row.className = "missing-item";
-    const title = document.createElement("span"); title.textContent = FIELD_LABELS[name];
+    const title = document.createElement("span"); title.textContent = fields[name] ? `${FIELD_LABELS[name]} · ${issues[name]}` : FIELD_LABELS[name];
     const points = document.createElement("b"); points.textContent = `+${weight}`;
     row.append(title,points); missing.append(row);
   });
@@ -166,8 +196,8 @@ async function loadWorkspace() {
         el("h2", "", task.fields.title || task.raw_description),
         el("p", "", task.fields.need || task.raw_description));
       const meta = el("div", "workspace-meta");
-      meta.append(el("span", task.status === "confirmed" ? (task.needs_confirmation ? "draft-chip" : "") : "draft-chip",
-        task.status === "confirmed" ? (task.needs_confirmation ? `Правки ждут подтверждения · опубликовано ${task.confirmed_score}/100` : `В каталоге · ${task.confirmed_score}/100`) : `Черновик · возможные ${task.preview_score}/100`),
+      meta.append(el("span", task.status === "confirmed" ? (task.needs_confirmation || task.rating_needs_review ? "draft-chip" : "") : "draft-chip",
+        task.status === "confirmed" ? (task.needs_confirmation ? `Правки ждут подтверждения · опубликовано ${task.confirmed_score}/100` : task.rating_needs_review ? `Рейтинг ждёт перепроверки · опубликовано ${task.confirmed_score}/100` : `В каталоге · ${task.confirmed_score}/100`) : `Черновик · возможные ${task.preview_score}/100`),
         el("span", "", `${task.proposal_count} откл.`));
       const actions = el("div", "workspace-actions-row");
       const edit = el("button", "secondary-button", "Редактировать"); edit.type = "button";
@@ -220,7 +250,7 @@ async function loadCatalog() {
       card.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || task.raw_description),
         el("p", "", task.fields.need || task.raw_description));
       const footer = el("div", "catalog-footer");
-      footer.append(el("span", `rating-chip rating-${task.readiness_level}`, `${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]}`),
+      footer.append(el("span", `rating-chip rating-${task.readiness_level}`, `${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]}${task.rating_needs_review ? " · перепроверка" : ""}`),
         el("span", "", `${task.proposal_count} откл.`));
       const button = el("button", "secondary-button", "Открыть →"); button.type = "button";
       button.addEventListener("click", () => openTask(task.id)); footer.append(button);
@@ -270,7 +300,7 @@ async function openTask(id) {
   const task = selectedCatalogTask;
   const detail = $("task-detail"); detail.replaceChildren(); detail.hidden = false;
   detail.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || "Черновик задачи"),
-    el("p", "", `Рейтинг: ${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]} · подтверждено бизнесом`));
+    el("p", "", `Рейтинг: ${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]} · ${task.rating_needs_review ? "ожидает перепроверки" : "подтверждено бизнесом"}`));
   const grid = el("div", "detail-grid");
   Object.entries(FIELD_LABELS).forEach(([key, label]) => {
     const row = el("div", "detail-field"); row.append(el("strong", "", label), el("p", "", task.fields[key] || "Не указано")); grid.append(row);

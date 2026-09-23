@@ -94,8 +94,33 @@ def clean_text(value, max_length=4000):
     return value.strip()[:max_length]
 
 
+PLACEHOLDERS = {"тест", "test", "нет", "незнаю", "потом", "заполнить", "xxx", "asdf", "qwerty", "йцукен"}
+
+
+def quality_issue(name, value):
+    """Small, explainable checks for obvious placeholders; not semantic AI judgment."""
+    text = value.strip()
+    if not text:
+        return "Поле пока пустое."
+    compact = "".join(char.casefold() for char in text if char.isalnum())
+    tokens = re.findall(r"\w+", text.casefold(), re.UNICODE)
+    if (len(compact) < 4 or compact in PLACEHOLDERS or len(set(compact)) == 1
+            or (len(tokens) > 1 and len(set(tokens)) == 1)):
+        return "Замените заглушку или повторы конкретными сведениями."
+    if name == "contact":
+        has_email = bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text))
+        has_handle = bool(re.fullmatch(r"@[\w.]{4,}", text, re.UNICODE))
+        has_phone = len(re.findall(r"\d", text)) >= 7
+        has_link = text.startswith(("https://", "http://")) and bool(urlparse(text).hostname)
+        if not (has_email or has_handle or has_phone or has_link):
+            return "Укажите email, @ник, ссылку или телефон минимум из 7 цифр."
+    elif not any(char.isalpha() for char in text):
+        return "Опишите сведения словами, а не только цифрами или символами."
+    return None
+
+
 def score_fields(fields):
-    earned = {name: weight if fields.get(name, "").strip() else 0
+    earned = {name: weight if quality_issue(name, fields.get(name, "")) is None else 0
               for name, weight in WEIGHTS.items()}
     return sum(earned.values()), earned
 
@@ -115,24 +140,28 @@ def task_from_row(row, published=False):
     published_fields = json.loads(row["published_fields_json"]) if row["published_fields_json"] else editor_fields
     fields = published_fields if published and row["status"] == "confirmed" else editor_fields
     preview_score, earned = score_fields(fields)
+    published_score, _ = score_fields(published_fields)
     questions = [
         {"field": field, "text": question}
-        for field, question in QUESTION_BANK if not fields.get(field, "").strip()
+        for field, question in QUESTION_BANK if quality_issue(field, fields.get(field, ""))
     ][:3]
     if len(questions) < 3:
         questions += [
             {"field": field, "text": question}
-            for field, question in QUESTION_BANK if fields.get(field, "").strip()
+            for field, question in QUESTION_BANK if not quality_issue(field, fields.get(field, ""))
         ][:3 - len(questions)]
     return {
         "id": row["id"], "raw_description": row["raw_description"],
         "topic": row["topic"], "fields": fields, "status": row["status"],
         "confirmed_score": row["confirmed_score"],
         "needs_confirmation": row["status"] == "confirmed" and editor_fields != published_fields and not published,
+        "rating_needs_review": row["status"] == "confirmed" and row["confirmed_score"] != published_score,
         "readiness_level": readiness_level(row["confirmed_score"]),
         "preview_score": preview_score, "earned": earned,
+        "quality_issues": {name: issue for name in FIELDS
+                           if (issue := quality_issue(name, fields.get(name, ""))) and fields.get(name, "").strip()},
         "questions": questions,
-        "missing": [name for name in WEIGHTS if not fields.get(name, "").strip()],
+        "missing": [name for name in WEIGHTS if not earned[name]],
     }
 
 
@@ -404,8 +433,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not task:
                     return self.json_response(404, {"error": "Задача не найдена."})
                 fields = task["fields"]
-                if not fields["title"] or not fields["need"]:
-                    raise ValueError("Перед подтверждением заполните название и потребность.")
+                if quality_issue("title", fields["title"]) or quality_issue("need", fields["need"]):
+                    raise ValueError("Перед подтверждением укажите осмысленные название и потребность.")
                 score, _ = score_fields(fields)
                 with DB_LOCK, connect() as db:
                     db.execute("""UPDATE tasks SET status = 'confirmed', confirmed_score = ?,

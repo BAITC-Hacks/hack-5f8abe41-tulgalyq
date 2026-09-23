@@ -139,6 +139,26 @@ class AppTest(unittest.TestCase):
                              (90, "priority"), (100, "priority")]:
             self.assertEqual(app.readiness_level(score), level)
 
+    def test_obvious_placeholders_do_not_raise_rating(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно улучшить очередь в школьной столовой"})
+        task_id = task["id"]
+        _, task = self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {
+            "title": "аааааааааа", "need": "бла бла бла", "data": "тест", "users": "123456",
+            "contact": "Иван",
+        }})
+        self.assertEqual(task["preview_score"], 0)
+        self.assertEqual(task["earned"]["data"], 0)
+        self.assertIn("data", task["quality_issues"])
+        self.assertIn("contact", task["quality_issues"])
+        self.assertIn("data", [item["field"] for item in task["questions"]])
+        self.assertEqual(self.api(f"/api/tasks/{task_id}/confirm", "POST")[0], 400)
+        _, corrected = self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {
+            "title": "Уменьшить очередь в столовой", "need": "Сократить время ожидания обеда",
+            "data": "Обезличенные замеры времени ожидания", "contact": "@schoolteam",
+        }})
+        self.assertEqual(corrected["preview_score"], 35)
+        self.assertEqual(self.api(f"/api/tasks/{task_id}/confirm", "POST")[1]["confirmed_score"], 35)
+
     def test_ai_questions_keep_card_under_user_control(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Очередь в школьной столовой слишком длинная"})
         result = {"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"questions": [
@@ -165,7 +185,7 @@ class MigrationTest(unittest.TestCase):
                     db.execute("CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, skills TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
                     db.execute("CREATE TABLE proposals (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, team_id TEXT NOT NULL, idea TEXT NOT NULL, plan TEXT NOT NULL, prototype_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
                     fields = {name: "" for name in app.FIELDS}
-                    fields.update(title="Старая задача", need="Сократить время ожидания")
+                    fields.update(title="Старая задача", need="бла бла")
                     db.execute("INSERT INTO tasks (id, raw_description, topic, fields_json, status, confirmed_score) VALUES ('old-task', 'Длинная очередь на входе', 'Другое', ?, 'confirmed', 10)", (json.dumps(fields),))
                     db.execute("INSERT INTO teams (id, name, skills) VALUES ('old-team', 'Старая команда', 'Дизайн')")
                     db.execute("INSERT INTO proposals (id, task_id, team_id, idea, plan) VALUES ('old-proposal', 'task', 'old-team', 'Идея', 'План')")
@@ -177,6 +197,7 @@ class MigrationTest(unittest.TestCase):
                 self.assertEqual((team["name"], team["interests"], team["technologies"]), ("Старая команда", "", ""))
                 self.assertEqual(proposal["deadline"], "")
                 self.assertEqual(json.loads(published["published_fields_json"])["title"], "Старая задача")
+                self.assertTrue(app.get_task("old-task")["rating_needs_review"])
             finally:
                 app.DB_PATH = old_path
 
