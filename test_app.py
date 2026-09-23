@@ -51,8 +51,15 @@ class AppTest(unittest.TestCase):
             mobile_css = response.read().decode("utf-8")
         with urlopen(self.base + "/theme.css") as response:
             theme_css = response.read().decode("utf-8")
+        with urlopen(self.base + "/tulgalyq-mark.svg") as response:
+            logo = response.read().decode("utf-8")
+            self.assertEqual(response.headers.get_content_type(), "image/svg+xml")
         self.assertIn('href="/mobile.css"', page)
         self.assertIn('<title>Tulgalyq', page)
+        self.assertIn('rel="icon" type="image/svg+xml" href="/tulgalyq-mark.svg"', page)
+        self.assertIn('class="brand-symbol" src="/tulgalyq-mark.svg"', page)
+        self.assertIn('class="avatar" src="/tulgalyq-mark.svg"', page)
+        self.assertIn('<svg', logo)
         self.assertIn('href="/theme.css"', page)
         self.assertIn('id="mobile-menu-toggle"', page)
         self.assertIn('id="theme-toggle"', page)
@@ -63,6 +70,7 @@ class AppTest(unittest.TestCase):
         self.assertIn('.score-panel summary', mobile_css)
         self.assertIn('html[data-theme="dark"]', theme_css)
         self.assertIn('grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr)', theme_css)
+        self.assertIn('grid-template-columns: minmax(0, 1fr) auto;', theme_css)
         self.assertIn('.menu-open .sidebar nav', theme_css)
 
     def test_full_flow_and_publication_boundary(self):

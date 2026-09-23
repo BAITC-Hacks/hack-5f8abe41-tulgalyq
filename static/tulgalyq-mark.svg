@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Tulgalyq</title>
+  <defs>
+    <linearGradient id="tile" x1="4" y1="4" x2="60" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#913E4D"/>
+      <stop offset="1" stop-color="#D27C84"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="24" y1="24" x2="41" y2="41" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFE0D7"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="62" height="62" rx="19" fill="url(#tile)"/>
+  <path d="M16 45V31c0-9 7-16 16-16s16 7 16 16v14" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M14 47h36" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" opacity=".72"/>
+  <path d="m32 22 2.65 7.35L42 32l-7.35 2.65L32 42l-2.65-7.35L22 32l7.35-2.65L32 22Z" fill="url(#spark)"/>
+  <circle cx="32" cy="32" r="2" fill="#AE5360"/>
+</svg>

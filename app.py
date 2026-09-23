@@ -386,6 +386,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_file("mobile.css", "text/css; charset=utf-8")
         if path == "/theme.css":
             return self.serve_file("theme.css", "text/css; charset=utf-8")
+        if path == "/tulgalyq-mark.svg":
+            return self.serve_file("tulgalyq-mark.svg", "image/svg+xml")
         if path == "/app.js":
             return self.serve_file("app.js", "text/javascript; charset=utf-8")
         if path == "/api/health":
