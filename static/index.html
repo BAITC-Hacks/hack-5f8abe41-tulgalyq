@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Миссия 100 — из идеи в задачу</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Миссия 100, главная">
+        <span class="brand-symbol">✳</span>
+        <span>МИССИЯ <strong>100</strong></span>
+      </a>
+      <div class="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+      <nav aria-label="Разделы">
+        <a class="nav-link active" href="#constructor"><span>◈</span> Конструктор задачи <small>01</small></a>
+        <a class="nav-link disabled" href="#" aria-disabled="true"><span>▦</span> Каталог задач <small>скоро</small></a>
+        <a class="nav-link disabled" href="#" aria-disabled="true"><span>↗</span> Отклики команд <small>скоро</small></a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="side-note"><span class="note-icon">✦</span><div><strong>Путь к 100 баллам</strong><p>Чёткая задача привлекает сильные команды.</p></div></div>
+        <span>HACKALEM AI · 2026</span>
+      </div>
+    </aside>
+
+    <main id="constructor">
+      <header class="topbar">
+        <div class="breadcrumbs">Платформа <span>/</span> Конструктор задачи</div>
+        <div class="topbar-right"><span class="status-dot"></span> Демо-пространство <span class="avatar">Б</span></div>
+      </header>
+
+      <div class="content">
+        <section class="hero">
+          <div class="hero-copy">
+            <div class="eyebrow"><span></span> КОНСТРУКТОР БИЗНЕС-ЗАДАЧ</div>
+            <h1>Превратите идею<br>в <em>миссию для команды.</em></h1>
+            <p>Опишите потребность своими словами. Мы поможем уточнить детали, покажем готовность задачи и подготовим её к публикации.</p>
+            <div class="hero-meta"><span>01 <b>Опишите</b></span><i></i><span>02 <b>Уточните</b></span><i></i><span>03 <b>Подтвердите</b></span></div>
+          </div>
+          <div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="hero-core">100<span>POINTS</span></div><span class="spark spark-a">✦</span><span class="spark spark-b">✧</span></div>
+        </section>
+
+        <div id="notice" class="notice" role="status" hidden></div>
+
+        <section id="draft-section" class="stage-card">
+          <div class="stage-heading"><div><span class="step-tag">ШАГ 01 / 03</span><h2>С чего начнём?</h2><p>Даже одного предложения достаточно для первого черновика.</p></div><span class="stage-icon">✎</span></div>
+          <form id="draft-form">
+            <label for="description">ОПИШИТЕ ЗАДАЧУ СВОИМИ СЛОВАМИ</label>
+            <textarea id="description" name="description" placeholder="Например: в нашей столовой длинные очереди. Хотим понять, как сократить время ожидания…" required minlength="12"></textarea>
+            <div class="form-bottom"><div class="select-wrap"><label for="topic">ТЕМА</label><select id="topic" name="topic"><option>Образование</option><option>Общепит</option><option>Здравоохранение</option><option>Госуслуги</option><option>Финансы</option><option>Другое</option></select></div><button class="primary-button" type="submit">Продолжить <span>→</span></button></div>
+          </form>
+        </section>
+
+        <section id="questions-section" class="stage-card" hidden>
+          <div class="stage-heading"><div><span class="step-tag">ШАГ 02 / 03</span><h2>Уточним важное</h2><p>Ответы останутся под вашим контролем — далее вы сможете изменить любое поле.</p></div><span class="stage-icon">?</span></div>
+          <div class="source-quote"><span>ВАШ ИСХОДНЫЙ ТЕКСТ</span><p id="raw-description"></p></div>
+          <form id="questions-form"><div id="questions-list"></div><div class="actions"><button type="button" class="text-button" id="back-to-draft">← Новый черновик</button><button class="primary-button" type="submit">Собрать карточку <span>→</span></button></div></form>
+        </section>
+
+        <section id="card-section" class="stage-card" hidden>
+          <div class="stage-heading"><div><span class="step-tag">ШАГ 03 / 03</span><h2>Проверьте карточку</h2><p>Система сохранила только введённые вами сведения. Заполните пропуски и подтвердите результат.</p></div><span class="stage-icon">✓</span></div>
+          <div class="editor-layout"><form id="card-form"><div id="card-fields"></div><div class="actions"><button class="secondary-button" type="submit">Сохранить изменения</button><button class="primary-button" id="confirm-button" type="button">Подтвердить карточку <span>✓</span></button></div></form>
+          <aside class="score-panel"><div class="score-label">ГОТОВНОСТЬ ЗАДАЧИ</div><div class="score-circle"><strong id="score-number">0</strong><span>/ 100</span></div><div class="score-state" id="score-state">Черновик</div><p id="score-explain">Баллы начисляются после вашего подтверждения.</p><div class="score-rule"></div><div class="score-label">ПУТЬ К 100 БАЛЛАМ</div><div id="missing-list" class="missing-list"></div></aside></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
