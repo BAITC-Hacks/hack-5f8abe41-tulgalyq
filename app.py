@@ -56,11 +56,13 @@ def init_db():
         )""")
         db.execute("""CREATE TABLE IF NOT EXISTS teams (
             id TEXT PRIMARY KEY, name TEXT NOT NULL, skills TEXT NOT NULL,
+            interests TEXT NOT NULL DEFAULT '', technologies TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )""")
         db.execute("""CREATE TABLE IF NOT EXISTS proposals (
             id TEXT PRIMARY KEY, task_id TEXT NOT NULL, team_id TEXT NOT NULL,
             idea TEXT NOT NULL, plan TEXT NOT NULL, prototype_url TEXT NOT NULL DEFAULT '',
+            deadline TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'pending',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(task_id) REFERENCES tasks(id), FOREIGN KEY(team_id) REFERENCES teams(id)
@@ -71,6 +73,14 @@ def init_db():
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(proposal_id) REFERENCES proposals(id)
         )""")
+        for table, columns in {
+            "teams": {"interests": "TEXT NOT NULL DEFAULT ''", "technologies": "TEXT NOT NULL DEFAULT ''"},
+            "proposals": {"deadline": "TEXT NOT NULL DEFAULT ''"},
+        }.items():
+            existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+            for column, definition in columns.items():
+                if column not in existing:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def clean_text(value, max_length=4000):
@@ -83,6 +93,16 @@ def score_fields(fields):
     earned = {name: weight if fields.get(name, "").strip() else 0
               for name, weight in WEIGHTS.items()}
     return sum(earned.values()), earned
+
+
+def readiness_level(score):
+    if score < 40:
+        return "low"
+    if score < 70:
+        return "medium"
+    if score < 90:
+        return "high"
+    return "priority"
 
 
 def task_from_row(row):
@@ -101,6 +121,7 @@ def task_from_row(row):
         "id": row["id"], "raw_description": row["raw_description"],
         "topic": row["topic"], "fields": fields, "status": row["status"],
         "confirmed_score": row["confirmed_score"],
+        "readiness_level": readiness_level(row["confirmed_score"]),
         "preview_score": preview_score, "earned": earned,
         "questions": questions,
         "missing": [name for name in WEIGHTS if not fields.get(name, "").strip()],
@@ -158,23 +179,17 @@ def ai_questions(task):
         raise ValueError("AI сейчас недоступен. Используйте обычные уточняющие вопросы.") from error
 
 
-def list_tasks(topic="", sort="newest", readiness=""):
+def list_tasks(topic="", sort="rating", readiness=""):
     with connect() as db:
         rows = db.execute("SELECT * FROM tasks WHERE status = 'confirmed' AND (? = '' OR topic = ?) ORDER BY created_at DESC, rowid DESC", (topic, topic)).fetchall()
         counts = dict(db.execute("SELECT task_id, COUNT(*) FROM proposals GROUP BY task_id").fetchall())
     tasks = [task_from_row(row) for row in rows]
     for task in tasks:
         task["proposal_count"] = counts.get(task["id"], 0)
-    if readiness == "low":
-        tasks = [task for task in tasks if task["confirmed_score"] < 50]
-    elif readiness == "medium":
-        tasks = [task for task in tasks if 50 <= task["confirmed_score"] < 80]
-    elif readiness == "high":
-        tasks = [task for task in tasks if task["confirmed_score"] >= 80]
+    if readiness:
+        tasks = [task for task in tasks if task["readiness_level"] == readiness]
     if sort == "rating":
         tasks.sort(key=lambda task: task["confirmed_score"], reverse=True)
-    elif sort == "readiness":
-        tasks.sort(key=lambda task: (task["status"] == "confirmed", task["confirmed_score"]), reverse=True)
     return tasks
 
 
@@ -192,11 +207,13 @@ def list_workspace_tasks():
 def list_proposals(task_id=None):
     with connect() as db:
         if task_id:
-            rows = db.execute("""SELECT p.*, t.name AS team_name, t.skills AS team_skills
+            rows = db.execute("""SELECT p.*, t.name AS team_name, t.skills AS team_skills,
+                t.interests AS team_interests, t.technologies AS team_technologies
                 FROM proposals p JOIN teams t ON t.id = p.team_id
                 WHERE p.task_id = ? ORDER BY p.created_at DESC""", (task_id,)).fetchall()
         else:
-            rows = db.execute("""SELECT p.*, t.name AS team_name, t.skills AS team_skills
+            rows = db.execute("""SELECT p.*, t.name AS team_name, t.skills AS team_skills,
+                t.interests AS team_interests, t.technologies AS team_technologies
                 FROM proposals p JOIN teams t ON t.id = p.team_id
                 ORDER BY p.created_at DESC""").fetchall()
     return [dict(row) for row in rows]
@@ -219,7 +236,7 @@ def seed_demo():
                 (), ("interaction_format", "contact"),
                 ("data", "interaction_format"),
                 ("data", "constraints", "users"),
-                ("data", "success_criteria", "expected_result", "contact"),
+                ("data", "success_criteria", "expected_result", "contact", "context"),
             )[index]:
                 fields[missing] = ""
             task_id = f"demo-card-{index + 1}"
@@ -229,9 +246,11 @@ def seed_demo():
             db.execute("INSERT INTO tasks (id, raw_description, topic, fields_json) VALUES (?, ?, ?, ?)",
                        (f"demo-draft-{index + 1}", raw, topic, json.dumps({name: "" for name in FIELDS}, ensure_ascii=False)))
             team_id = f"demo-team-{index + 1}"
-            db.execute("INSERT INTO teams (id, name, skills) VALUES (?, ?, ?)", (team_id, f"Команда {index + 1}", "Дизайн, разработка, исследование"))
-            db.execute("INSERT INTO proposals (id, task_id, team_id, idea, plan, prototype_url) VALUES (?, ?, ?, ?, ?, '')",
-                       (f"demo-proposal-{index + 1}", task_id, team_id, f"Сделаем прототип для задачи «{fields['title']}».", "Исследование → прототип → тестирование"))
+            db.execute("INSERT INTO teams (id, name, skills, interests, technologies) VALUES (?, ?, ?, ?, ?)",
+                       (team_id, f"Команда {index + 1}", "Дизайн, разработка, исследование", topic, "Python, JavaScript"))
+            db.execute("INSERT INTO proposals (id, task_id, team_id, idea, plan, deadline, prototype_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                       (f"demo-proposal-{index + 1}", task_id, team_id, f"Сделаем прототип для задачи «{fields['title']}».",
+                        "Исследование → прототип → тестирование", "2 недели", f"https://example.org/demo/{index + 1}"))
     return True
 
 
@@ -286,16 +305,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.json_response(200, list_workspace_tasks())
         if path == "/api/tasks":
             topic = query.get("topic", [""])[0]
-            sort = query.get("sort", ["newest"])[0]
+            sort = query.get("sort", ["rating"])[0]
             readiness = query.get("readiness", [""])[0]
-            if sort not in ("newest", "rating", "readiness") or readiness not in ("", "low", "medium", "high"):
+            if sort not in ("newest", "rating") or readiness not in ("", "low", "medium", "high", "priority"):
                 return self.json_response(400, {"error": "Неизвестный фильтр или сортировка."})
             return self.json_response(200, list_tasks(topic, sort, readiness))
         if path == "/api/proposals":
             return self.json_response(200, list_proposals(query.get("task_id", [None])[0]))
         if path == "/api/teams":
             with connect() as db:
-                teams = [dict(row) for row in db.execute("""SELECT t.id, t.name, t.skills, t.created_at,
+                teams = [dict(row) for row in db.execute("""SELECT t.id, t.name, t.skills, t.interests, t.technologies, t.created_at,
                     COALESCE(SUM(pr.points), 0) AS points FROM teams t
                     LEFT JOIN proposals p ON p.team_id = t.id
                     LEFT JOIN progress pr ON pr.proposal_id = p.id
@@ -352,17 +371,22 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/teams":
                 name = clean_text(data.get("name", ""), 100)
                 skills = clean_text(data.get("skills", ""), 500)
+                interests = clean_text(data.get("interests", ""), 500)
+                technologies = clean_text(data.get("technologies", ""), 500)
                 if len(name) < 2:
                     raise ValueError("Укажите название команды.")
                 team_id = str(uuid.uuid4())
                 with DB_LOCK, connect() as db:
-                    db.execute("INSERT INTO teams (id, name, skills) VALUES (?, ?, ?)", (team_id, name, skills))
-                return self.json_response(201, {"id": team_id, "name": name, "skills": skills})
+                    db.execute("INSERT INTO teams (id, name, skills, interests, technologies) VALUES (?, ?, ?, ?, ?)",
+                               (team_id, name, skills, interests, technologies))
+                return self.json_response(201, {"id": team_id, "name": name, "skills": skills,
+                                                "interests": interests, "technologies": technologies})
             if path == "/api/proposals":
                 task_id = clean_text(data.get("task_id", ""), 100)
                 team_id = clean_text(data.get("team_id", ""), 100)
                 idea = clean_text(data.get("idea", ""))
                 plan = clean_text(data.get("plan", ""))
+                deadline = clean_text(data.get("deadline", ""), 120)
                 url = clean_text(data.get("prototype_url", ""), 500)
                 if len(idea) < 10 or len(plan) < 10:
                     raise ValueError("Опишите идею и план хотя бы одним предложением.")
@@ -375,8 +399,8 @@ class Handler(BaseHTTPRequestHandler):
                 with DB_LOCK, connect() as db:
                     if not db.execute("SELECT 1 FROM teams WHERE id = ?", (team_id,)).fetchone():
                         return self.json_response(404, {"error": "Команда не найдена."})
-                    db.execute("INSERT INTO proposals (id, task_id, team_id, idea, plan, prototype_url) VALUES (?, ?, ?, ?, ?, ?)",
-                               (proposal_id, task_id, team_id, idea, plan, url))
+                    db.execute("INSERT INTO proposals (id, task_id, team_id, idea, plan, deadline, prototype_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                               (proposal_id, task_id, team_id, idea, plan, deadline, url))
                 return self.json_response(201, {"id": proposal_id})
             if path.startswith("/api/proposals/") and path.endswith("/decision"):
                 proposal_id = path.split("/")[3]

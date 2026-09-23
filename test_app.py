@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 import json
 import os
+import sqlite3
 import unittest
 from unittest.mock import patch
 
@@ -79,17 +80,27 @@ class AppTest(unittest.TestCase):
         self.assertEqual(result["tasks"], 5)
         self.assertFalse(self.api("/api/demo/seed", "POST")[1]["created"])
         ratings = [task["confirmed_score"] for task in self.api("/api/tasks?sort=rating")[1]]
+        self.assertEqual(ratings, [task["confirmed_score"] for task in self.api("/api/tasks")[1]])
         self.assertEqual(len(ratings), 5)
         self.assertEqual(ratings, sorted(ratings, reverse=True))
         self.assertLess(ratings[-1], ratings[0])
         self.assertEqual(len(self.api("/api/tasks?readiness=low")[1]), 1)
-        self.assertEqual(len(self.api("/api/tasks?readiness=medium")[1]), 2)
-        self.assertEqual(len(self.api("/api/tasks?readiness=high")[1]), 2)
+        self.assertEqual(len(self.api("/api/tasks?readiness=medium")[1]), 1)
+        self.assertEqual(len(self.api("/api/tasks?readiness=high")[1]), 1)
+        self.assertEqual(len(self.api("/api/tasks?readiness=priority")[1]), 2)
         self.assertEqual(len(self.api("/api/teams")[1]), 5)
         self.assertEqual(len(self.api("/api/proposals")[1]), 5)
+        self.assertTrue(all(team["interests"] and team["technologies"] for team in self.api("/api/teams")[1]))
+        self.assertTrue(all(item["deadline"] and item["prototype_url"] for item in self.api("/api/proposals")[1]))
         workspace = self.api("/api/workspace/tasks")[1]
         self.assertEqual(len(workspace), 11)
         self.assertEqual(sum(task["status"] == "draft" for task in workspace), 6)
+
+    def test_readiness_boundaries_match_hackathon_case(self):
+        for score, level in [(0, "low"), (39, "low"), (40, "medium"),
+                             (69, "medium"), (70, "high"), (89, "high"),
+                             (90, "priority"), (100, "priority")]:
+            self.assertEqual(app.readiness_level(score), level)
 
     def test_ai_questions_keep_card_under_user_control(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Очередь в школьной столовой слишком длинная"})
@@ -104,6 +115,27 @@ class AppTest(unittest.TestCase):
         self.assertEqual(answer["source"], "openai")
         self.assertEqual(len(answer["questions"]), 3)
         self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["data"], "")
+
+
+class MigrationTest(unittest.TestCase):
+    def test_old_demo_database_keeps_records(self):
+        with TemporaryDirectory() as folder:
+            old_path = app.DB_PATH
+            app.DB_PATH = Path(folder) / "old.sqlite3"
+            try:
+                with sqlite3.connect(app.DB_PATH) as db:
+                    db.execute("CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, skills TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+                    db.execute("CREATE TABLE proposals (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, team_id TEXT NOT NULL, idea TEXT NOT NULL, plan TEXT NOT NULL, prototype_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+                    db.execute("INSERT INTO teams (id, name, skills) VALUES ('old-team', 'Старая команда', 'Дизайн')")
+                    db.execute("INSERT INTO proposals (id, task_id, team_id, idea, plan) VALUES ('old-proposal', 'task', 'old-team', 'Идея', 'План')")
+                app.init_db()
+                with app.connect() as db:
+                    team = db.execute("SELECT name, interests, technologies FROM teams WHERE id = 'old-team'").fetchone()
+                    proposal = db.execute("SELECT deadline FROM proposals WHERE id = 'old-proposal'").fetchone()
+                self.assertEqual((team["name"], team["interests"], team["technologies"]), ("Старая команда", "", ""))
+                self.assertEqual(proposal["deadline"], "")
+            finally:
+                app.DB_PATH = old_path
 
 
 if __name__ == "__main__":

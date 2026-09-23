@@ -6,6 +6,7 @@ const FIELD_LABELS = {
   contact: "Контакт бизнеса", interaction_format: "Формат взаимодействия"
 };
 const WEIGHTS = {context:10,need:10,data:20,expected_result:15,success_criteria:15,constraints:10,users:10,contact:5,interaction_format:5};
+const READINESS_LABELS = {low:"Нужно уточнить",medium:"Рабочая",high:"Готовая",priority:"Приоритетная"};
 let currentTask = null;
 let selectedCatalogTask = null;
 let proposalTaskFilterValue = "";
@@ -204,7 +205,7 @@ async function loadCatalog() {
       card.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || task.raw_description),
         el("p", "", task.fields.need || task.raw_description));
       const footer = el("div", "catalog-footer");
-      footer.append(el("span", "rating-chip", task.status === "confirmed" ? `${task.confirmed_score}/100 · подтверждено` : "Черновик · 0 подтверждено"),
+      footer.append(el("span", `rating-chip rating-${task.readiness_level}`, `${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]}`),
         el("span", "", `${task.proposal_count} откл.`));
       const button = el("button", "secondary-button", "Открыть →"); button.type = "button";
       button.addEventListener("click", () => openTask(task.id)); footer.append(button);
@@ -228,7 +229,7 @@ async function openTask(id) {
   const task = selectedCatalogTask;
   const detail = $("task-detail"); detail.replaceChildren(); detail.hidden = false;
   detail.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || "Черновик задачи"),
-    el("p", "", `Рейтинг: ${task.status === "confirmed" ? task.confirmed_score : 0}/100 · ${task.status === "confirmed" ? "подтверждено бизнесом" : "не подтверждено"}`));
+    el("p", "", `Рейтинг: ${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]} · подтверждено бизнесом`));
   const grid = el("div", "detail-grid");
   Object.entries(FIELD_LABELS).forEach(([key, label]) => {
     const row = el("div", "detail-field"); row.append(el("strong", "", label), el("p", "", task.fields[key] || "Не указано")); grid.append(row);
@@ -236,25 +237,32 @@ async function openTask(id) {
   detail.append(grid, el("h3", "", "Предложить решение"));
   const form = el("form", "proposal-form"); form.id = "proposal-form";
   const teamSelect = el("select"); teamSelect.id = "proposal-team";
+  teamSelect.setAttribute("aria-label", "Команда");
   teamSelect.append(new Option("Создать новую команду", ""));
-  (await request("/api/teams")).forEach(team => teamSelect.append(new Option(`${team.name} · ${team.skills}`, team.id)));
+  (await request("/api/teams")).forEach(team => teamSelect.append(new Option(`${team.name} · ${team.interests || team.skills || "без описания"}`, team.id)));
   const teamName = el("input"); teamName.placeholder = "Название новой команды"; teamName.maxLength = 100;
   const teamSkills = el("input"); teamSkills.placeholder = "Навыки команды"; teamSkills.maxLength = 500;
+  const teamInterests = el("input"); teamInterests.placeholder = "Интересы команды (например, образование)"; teamInterests.maxLength = 500;
+  const teamTechnologies = el("input"); teamTechnologies.placeholder = "Технологии (например, Python, JavaScript)"; teamTechnologies.maxLength = 500;
   const idea = el("textarea"); idea.placeholder = "Идея решения (обязательно)"; idea.required = true; idea.minLength = 10;
   const plan = el("textarea"); plan.placeholder = "План работы (обязательно)"; plan.required = true; plan.minLength = 10;
+  const deadline = el("input"); deadline.placeholder = "Срок выполнения (например, 2 недели)"; deadline.maxLength = 120;
   const link = el("input"); link.placeholder = "Ссылка на прототип (необязательно)"; link.type = "url";
+  for (const input of [teamName, teamSkills, teamInterests, teamTechnologies, idea, plan, deadline, link]) {
+    input.setAttribute("aria-label", input.placeholder);
+  }
   const button = el("button", "primary-button", "Отправить предложение →"); button.type = "submit";
-  teamSelect.addEventListener("change", () => { teamName.hidden = teamSkills.hidden = Boolean(teamSelect.value); });
-  form.append(teamSelect, teamName, teamSkills, idea, plan, link, button);
+  teamSelect.addEventListener("change", () => { for (const input of [teamName, teamSkills, teamInterests, teamTechnologies]) input.hidden = Boolean(teamSelect.value); });
+  form.append(teamSelect, teamName, teamSkills, teamInterests, teamTechnologies, idea, plan, deadline, link, button);
   form.addEventListener("submit", async event => {
     event.preventDefault(); button.disabled = true;
     try {
       let teamId = teamSelect.value;
       if (!teamId) {
-        const team = await request("/api/teams", {method:"POST", body:JSON.stringify({name:teamName.value, skills:teamSkills.value})});
+        const team = await request("/api/teams", {method:"POST", body:JSON.stringify({name:teamName.value, skills:teamSkills.value, interests:teamInterests.value, technologies:teamTechnologies.value})});
         teamId = team.id;
       }
-      await request("/api/proposals", {method:"POST", body:JSON.stringify({task_id:task.id, team_id:teamId, idea:idea.value, plan:plan.value, prototype_url:link.value})});
+      await request("/api/proposals", {method:"POST", body:JSON.stringify({task_id:task.id, team_id:teamId, idea:idea.value, plan:plan.value, deadline:deadline.value, prototype_url:link.value})});
       await loadCatalog(); await openTask(task.id); alert("Предложение отправлено. Решение остаётся за бизнесом.");
     } catch (error) { alert(error.message); }
     finally { button.disabled = false; }
@@ -293,6 +301,9 @@ async function loadProposals() {
         el("h2", "", task.fields.title || task.raw_description),
         el("p", "", `Навыки: ${proposal.team_skills || "не указаны"}`),
         el("p", "", proposal.idea), el("p", "", `План: ${proposal.plan}`));
+      if (proposal.team_interests) card.append(el("p", "", `Интересы: ${proposal.team_interests}`));
+      if (proposal.team_technologies) card.append(el("p", "", `Технологии: ${proposal.team_technologies}`));
+      if (proposal.deadline) card.append(el("p", "", `Срок: ${proposal.deadline}`));
       if (proposal.prototype_url) {
         const link = el("a", "", "Открыть прототип ↗"); link.href = proposal.prototype_url;
         link.target = "_blank"; link.rel = "noopener noreferrer"; card.append(link);
