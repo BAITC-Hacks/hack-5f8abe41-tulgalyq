@@ -19,7 +19,7 @@ import app
 
 class AppTest(unittest.TestCase):
     def setUp(self):
-        self.gemini_env = patch.dict(os.environ, {"GEMINI_API_KEY": ""})
+        self.gemini_env = patch.dict(os.environ, {"GEMINI_API_KEY": "", "OPENAI_API_KEY": ""})
         self.gemini_env.start()
         self.temp = TemporaryDirectory()
         self.old_db = app.DB_PATH
@@ -240,6 +240,14 @@ class AppTest(unittest.TestCase):
         self.assertIn("data", task["quality_issues"])
         self.assertIn("contact", task["quality_issues"])
         self.assertIn("data", [item["field"] for item in task["questions"]])
+        code, blocked = self.api(f"/api/tasks/{task_id}/confirm", "POST")
+        self.assertEqual(code, 422)
+        self.assertIn("title", blocked["issues"])
+        self.assertIn("contact", blocked["issues"])
+        self.assertEqual(self.api("/api/tasks")[1], [])
+        self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {
+            "title": "", "need": "", "data": "", "users": "", "contact": "",
+        }})
         _, published_draft = self.api(f"/api/tasks/{task_id}/confirm", "POST")
         self.assertEqual(published_draft["confirmed_score"], 0)
         self.assertEqual(self.api("/api/tasks?readiness=low")[1][0]["id"], task_id)
@@ -279,6 +287,103 @@ class AppTest(unittest.TestCase):
         self.assertEqual(len(answer["questions"]), 3)
         self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["data"], "тест")
         self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["need"], "")
+
+    def test_answer_review_rejects_gibberish_without_saving_and_keeps_blank_optional(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Очередь в школьной столовой слишком длинная"})
+        path = f"/api/tasks/{task['id']}/review"
+        code, review = self.api(path, "POST", {"answers": [
+            {"field": "need", "question": "Что хотите изменить?", "answer": "asdfghjkl"},
+            {"field": "data", "question": "Какие данные доступны?", "answer": "1234567"},
+            {"field": "success_criteria", "answer": ""},
+        ]})
+        self.assertEqual(code, 200)
+        self.assertEqual(review["source"], "local")
+        self.assertEqual(set(review["issues"]), {"need", "data"})
+        self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["need"], "")
+        self.assertEqual(self.api(path, "POST", {"answers": [
+            {"field": "need", "answer": "текст"}, {"field": "need", "answer": "повтор"},
+        ]})[0], 400)
+        self.assertEqual(self.api(path, "POST", {"answers": [
+            {"field": "wrong", "answer": "текст"},
+        ]})[0], 400)
+
+    def test_gemini_review_checks_semantics_and_does_not_send_contact(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
+        self.api(f"/api/tasks/{task['id']}", "PATCH", {"fields": {"contact": "@schoolteam"}})
+        result = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": json.dumps({
+            "items": [
+                {"field": "need", "ok": False, "feedback": "Опишите, что изменить в очереди столовой."},
+                {"field": "data", "ok": True, "feedback": ""},
+            ]})}]}}]}
+        answers = [
+            {"field": "need", "question": "Что нужно изменить?", "answer": "У нас есть красивые баннеры"},
+            {"field": "data", "question": "Какие данные доступны?", "answer": "Замеры ожидания за неделю"},
+        ]
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-secret"}), \
+                patch.object(app, "urlopen", return_value=BytesIO(json.dumps(result).encode())) as mocked:
+            code, review = self.api(f"/api/tasks/{task['id']}/review", "POST", {"answers": answers})
+        self.assertEqual(code, 200)
+        self.assertEqual(review["source"], "gemini")
+        self.assertEqual(set(review["issues"]), {"need"})
+        sent = json.loads(mocked.call_args.args[0].data)
+        self.assertEqual(sent["systemInstruction"]["parts"][0]["text"], app.REVIEW_INSTRUCTIONS)
+        self.assertNotIn("contact", sent["contents"][0]["parts"][0]["text"])
+        self.assertEqual(self.api(f"/api/tasks/{task['id']}")[1]["fields"]["need"], "")
+
+    def test_semantic_review_blocks_publication_but_preserves_draft(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
+        task_id = task["id"]
+        self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {
+            "need": "Сделать логотип для пиццерии", "title": "Очередь в столовой",
+        }})
+        response = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": json.dumps({
+            "items": [
+                {"field": "title", "ok": True, "feedback": ""},
+                {"field": "need", "ok": False, "feedback": "Укажите изменение, связанное с очередью."},
+            ]})}]}}]}
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-secret"}), \
+                patch.object(app, "urlopen", return_value=BytesIO(json.dumps(response).encode())):
+            code, blocked = self.api(f"/api/tasks/{task_id}/confirm", "POST")
+        self.assertEqual(code, 422)
+        self.assertIn("need", blocked["issues"])
+        self.assertEqual(self.api(f"/api/tasks/{task_id}")[1]["status"], "draft")
+        self.assertEqual(self.api("/api/tasks")[1], [])
+        self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {"need": ""}})
+        self.assertEqual(self.api(f"/api/tasks/{task_id}/confirm", "POST")[0], 200)
+
+    def test_malformed_review_falls_back_to_local_rules(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
+        response = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": json.dumps({
+            "items": [{"field": "wrong", "ok": True, "feedback": ""}],
+        })}]}}]}
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-secret"}), \
+                patch.object(app, "urlopen", return_value=BytesIO(json.dumps(response).encode())):
+            code, review = self.api(f"/api/tasks/{task['id']}/review", "POST", {"answers": [
+                {"field": "need", "answer": "Сократить ожидание учеников у стойки выдачи"},
+            ]})
+        self.assertEqual(code, 200)
+        self.assertEqual(review["source"], "local")
+        self.assertEqual(review["fallback_reason"], "api_unavailable")
+
+    def test_openai_review_uses_structured_output_and_local_contact_check(self):
+        _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в школьной столовой"})
+        response = {"status": "completed", "output": [{"type": "message", "content": [{
+            "type": "output_text", "text": json.dumps({"items": [
+                {"field": "need", "ok": True, "feedback": ""},
+            ]}),
+        }]}]}
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key", "GEMINI_API_KEY": ""}), \
+                patch.object(app, "urlopen", return_value=BytesIO(json.dumps(response).encode())) as mocked:
+            code, review = self.api(f"/api/tasks/{task['id']}/review", "POST", {"answers": [
+                {"field": "need", "answer": "Сократить ожидание учеников у стойки выдачи"},
+                {"field": "contact", "answer": "неизвестно"},
+            ]})
+        self.assertEqual(code, 200)
+        self.assertEqual(review["source"], "openai")
+        self.assertEqual(set(review["issues"]), {"contact"})
+        sent = json.loads(mocked.call_args.args[0].data)
+        self.assertEqual(sent["text"]["format"]["type"], "json_schema")
+        self.assertNotIn("contact", sent["input"])
 
     def test_gemini_questions_use_server_key_and_do_not_write_business_facts(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Очередь в школьной столовой слишком длинная"})
@@ -405,6 +510,10 @@ class AppTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn("contact", card["quality_issues"])
         self.assertEqual(card["earned"]["contact"], 0)
+        code, review = self.api(f"/api/tasks/{task_id}/confirm", "POST")
+        self.assertEqual(code, 422)
+        self.assertIn("contact", review["issues"])
+        self.api(f"/api/tasks/{task_id}", "PATCH", {"fields": {"contact": ""}})
         self.assertEqual(self.api(f"/api/tasks/{task_id}/confirm", "POST")[0], 200)
         self.assertEqual(len(self.api("/api/tasks")[1]), 1)
 

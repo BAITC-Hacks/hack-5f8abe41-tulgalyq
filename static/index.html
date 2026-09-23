@@ -62,9 +62,9 @@
         <section id="questions-section" class="stage-card" hidden>
           <div class="stage-heading"><div><span class="step-tag">ШАГ 02 / 03</span><h2>Уточним важное</h2><p>Ответы останутся под вашим контролем — далее вы сможете изменить любое поле.</p></div><span class="stage-icon">?</span></div>
           <div class="ai-toolbar"><span id="question-source">Уточняющие вопросы по шаблону</span><button type="button" class="secondary-button" id="ai-questions-button">↻ Обновить вопросы</button></div>
-          <p class="ai-safety-note">При подключённом API модель увидит описание и ответы, которые вы уже набрали. Не вводите личные или чувствительные данные. Вопросы ничего не публикуют автоматически.</p>
+          <p class="ai-safety-note">При подключённом API модель увидит описание и ответы, которые вы уже набрали. Не вводите личные или чувствительные данные. AI проверит уместность ответов, но не достоверность фактов; контакт проверяется только локально. Ничего не публикуется автоматически.</p>
           <div class="source-quote"><span>ВАШ ИСХОДНЫЙ ТЕКСТ</span><p id="raw-description"></p></div>
-          <form id="questions-form"><div id="questions-list"></div><div class="actions"><button type="button" class="text-button" id="back-to-draft">← Новый черновик</button><button class="primary-button" type="submit">Собрать карточку <span>→</span></button></div></form>
+          <form id="questions-form"><div id="questions-list"></div><p id="answer-review-status" class="ai-safety-note" role="status" hidden></p><div class="actions"><button type="button" class="text-button" id="back-to-draft">← Новый черновик</button><button class="primary-button" type="submit">Собрать карточку <span>→</span></button></div></form>
         </section>
 
         <section id="card-section" class="stage-card" hidden>

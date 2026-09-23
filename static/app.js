@@ -17,7 +17,8 @@ const IMPROVEMENT_QUESTIONS = {
   contact: "Как команда свяжется с ответственным представителем?",
   interaction_format: "Как часто бизнес сможет давать обратную связь?"
 };
-const PLACEHOLDERS = new Set(["тест","test","нет","незнаю","потом","заполнить","xxx","asdf","qwerty","йцукен"]);
+const PLACEHOLDERS = new Set(["тест","test","нет","незнаю","потом","заполнить","xxx","asdf","qwerty","йцукен","нетданных","данныхнет","поканет","незнаюпока"]);
+const KEYBOARD_MASHES = ["asdfghjkl","qwertyuiop","zxcvbnm","йцукенгшщз","фывапролджэ","ячсмитьбю"];
 const READINESS_LABELS = {low:"Черновик · требует уточнения",medium:"Рабочая",high:"Готовая",priority:"Приоритетная"};
 let currentTask = null;
 let selectedCatalogTask = null;
@@ -69,6 +70,7 @@ function qualityIssue(name, value) {
   const compact = [...text].filter(char => /[\p{L}\p{N}]/u.test(char)).join("").toLocaleLowerCase("ru");
   const tokens = (text.toLocaleLowerCase("ru").match(/[\p{L}\p{N}_]+/gu) || []);
   if (compact.length < 4 || PLACEHOLDERS.has(compact) || new Set(compact).size === 1 ||
+      KEYBOARD_MASHES.some(row => compact.length >= 6 && row.includes(compact)) ||
       (tokens.length > 1 && new Set(tokens).size === 1)) return "Замените заглушку или повторы конкретными сведениями.";
   if (name === "contact") {
     const hasEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text);
@@ -84,7 +86,13 @@ function qualityIssue(name, value) {
 async function request(path, options = {}) {
   const response = await fetch(path, {headers:{"Content-Type":"application/json"}, ...options});
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Не удалось выполнить действие.");
+  if (!response.ok) {
+    const error = new Error(data.error || "Не удалось выполнить действие.");
+    error.issues = data.issues || {};
+    error.source = data.source;
+    error.fallback_reason = data.fallback_reason;
+    throw error;
+  }
   return data;
 }
 function showNotice(message, error=false) {
@@ -105,22 +113,47 @@ function updateTask(task) {
 function buildQuestions(answers = {}) {
   $("raw-description").textContent = currentTask.raw_description;
   const list = $("questions-list"); list.replaceChildren();
-  currentTask.questions.forEach((question, index) => {
+  const extra = Object.keys(answers).filter(field => answers[field]?.trim() &&
+    !currentTask.questions.some(question => question.field === field));
+  const questions = [...currentTask.questions,
+    ...extra.map(field => ({field, text: IMPROVEMENT_QUESTIONS[field] || FIELD_LABELS[field], earlier: true}))];
+  questions.forEach((question, index) => {
     const row = document.createElement("div"); row.className = "question-row";
-    const label = document.createElement("label"); label.htmlFor = "answer-"+index; label.textContent = `${String(index+1).padStart(2,"0")}. ${question.text}`;
-    const input = document.createElement("textarea"); input.id = "answer-"+index; input.dataset.field = question.field;
+    const label = document.createElement("label"); label.htmlFor = "answer-"+index;
+    label.textContent = question.earlier ? `Ранее введено · ${FIELD_LABELS[question.field]}` : `${String(index+1).padStart(2,"0")}. ${question.text}`;
+    const input = document.createElement("textarea"); input.id = "answer-"+index;
+    input.dataset.field = question.field; input.dataset.question = question.text;
     input.placeholder = "Ваш ответ…"; input.value = answers[question.field] ?? currentTask.fields[question.field] ?? "";
-    row.append(label,input); list.append(row);
+    const hint = el("small", "field-hint"); hint.id = "answer-hint-"+index; hint.hidden = true;
+    input.setAttribute("aria-describedby", hint.id);
+    input.addEventListener("input", () => {
+      hint.hidden = true; hint.textContent = ""; input.setAttribute("aria-invalid", "false");
+    });
+    row.append(label,input,hint); list.append(row);
   });
+  $("answer-review-status").hidden = true;
 }
+function showAnswerIssues(issues) {
+  let first = null;
+  $("questions-list").querySelectorAll("textarea").forEach(input => {
+    const hint = input.parentElement.querySelector(".field-hint");
+    hint.textContent = issues[input.dataset.field] || "";
+    hint.hidden = !hint.textContent;
+    input.setAttribute("aria-invalid", String(!hint.hidden));
+    if (!hint.hidden && !first) first = input;
+  });
+  if (first) { first.scrollIntoView({behavior:"smooth",block:"center"}); first.focus({preventScroll:true}); }
+}
+let serverReviewIssues = {};
 function buildCard() {
+  serverReviewIssues = {};
   const container = $("card-fields"); container.className = "card-grid"; container.replaceChildren();
   Object.entries(FIELD_LABELS).forEach(([name,labelText]) => {
     const row = document.createElement("div"); row.className = "field-row" + (["context","need","data","expected_result","success_criteria"].includes(name) ? " full" : "");
     const label = document.createElement("label"); label.htmlFor = "field-"+name; label.textContent = labelText;
     const input = ["title","contact","interaction_format"].includes(name) ? document.createElement("input") : document.createElement("textarea");
     input.id = "field-"+name; input.name = name; input.value = currentTask.fields[name] || "";
-    input.addEventListener("input", updatePreview);
+    input.addEventListener("input", () => { delete serverReviewIssues[name]; updatePreview(); });
     const hint = el("small", "field-hint"); hint.id = "hint-"+name; hint.hidden = true;
     input.setAttribute("aria-describedby", hint.id);
     row.append(label,input,hint); container.append(row);
@@ -132,7 +165,7 @@ function fieldsFromForm() {
 }
 function updatePreview() {
   const fields = fieldsFromForm();
-  const issues = Object.fromEntries(Object.keys(FIELD_LABELS).map(name => [name, qualityIssue(name, fields[name])]));
+  const issues = Object.fromEntries(Object.keys(FIELD_LABELS).map(name => [name, serverReviewIssues[name] || qualityIssue(name, fields[name])]));
   const preview = Object.entries(WEIGHTS).reduce((sum,[name,weight])=>sum+(issues[name] ? 0 : weight),0);
   Object.keys(FIELD_LABELS).forEach(name => {
     const hint = $("hint-"+name);
@@ -205,11 +238,32 @@ $("draft-form").addEventListener("submit",async (event)=>{
 });
 $("questions-form").addEventListener("submit",async(event)=>{
   event.preventDefault();
-  const fields = {...pendingQuestionAnswers, ...Object.fromEntries([...$("questions-list").querySelectorAll("textarea")].map(input=>[input.dataset.field,input.value]))};
+  const button = $("questions-form").querySelector('button[type="submit"]');
+  if (button.disabled) return;
+  button.disabled = true;
+  const inputs = [...$("questions-list").querySelectorAll("textarea")];
+  const fields = Object.fromEntries(inputs.map(input=>[input.dataset.field,input.value]));
+  const answers = inputs.map(input=>({field:input.dataset.field,question:input.dataset.question,answer:input.value}));
+  const status = $("answer-review-status"); status.textContent = "Проверяем, отвечают ли ваши слова на вопросы…"; status.hidden = false;
   try {
+    const review = await request(`/api/tasks/${currentTask.id}/review`,{method:"POST",body:JSON.stringify({answers})});
+    showAnswerIssues(review.issues);
+    if (Object.keys(review.issues).length) {
+      status.textContent = review.source === "local"
+        ? "Локальная проверка нашла неточные ответы. Уточните их или оставьте поле пустым."
+        : "AI нашёл ответы не по теме. Уточните их или оставьте поле пустым.";
+      return;
+    }
+    status.textContent = review.source === "local"
+      ? "Локальная проверка пройдена; AI недоступен, смысловая проверка не проводилась."
+      : "AI проверил уместность ответов. Факты подтвердите сами на следующем шаге.";
     const task = await request(`/api/tasks/${currentTask.id}`,{method:"PATCH",body:JSON.stringify({fields})});
     updateTask(task); pendingQuestionAnswers = {}; buildCard(); showStage("card");
+    if (review.fallback_reason && review.checked) {
+      showNotice("Ответы прошли только локальную проверку: AI сейчас недоступен. Проверьте их смысл перед публикацией.");
+    }
   } catch(error) { showNotice(error.message,true); }
+  finally { button.disabled = false; }
 });
 $("card-form").addEventListener("submit",async(event)=>{
   event.preventDefault(); await saveCard();
@@ -228,12 +282,26 @@ $("confirm-button").addEventListener("click",async()=>{
   try {
     if (!(await saveCard())) return;
     const published = await request(`/api/tasks/${currentTask.id}/confirm`,{method:"POST",body:"{}"});
-    $("publish-success-text").textContent = `Рейтинг готовности: ${published.confirmed_score}/100. Карточка сохранена здесь — её можно открыть, дополнить и повторно подтвердить.`;
+    const reviewNote = published.review_fallback_reason && published.review_checked
+      ? " AI был недоступен: проверены только очевидные заглушки, смысл ответов проверьте сами."
+      : "";
+    $("publish-success-text").textContent = `Рейтинг готовности: ${published.confirmed_score}/100. Карточка сохранена здесь — её можно открыть, дополнить и повторно подтвердить.${reviewNote}`;
     $("publish-success").hidden = false;
     resetConstructor();
     if (location.hash === "#workspace") showView("workspace");
     else location.hash = "workspace";
-  } catch(error) { showNotice(error.message,true); }
+  } catch(error) {
+    if (error.issues) {
+      serverReviewIssues = error.issues;
+      updatePreview();
+      const first = Object.keys(error.issues)[0];
+      if (first && $("field-"+first)) {
+        $("field-"+first).scrollIntoView({behavior:"smooth",block:"center"});
+        $("field-"+first).focus({preventScroll:true});
+      }
+    }
+    showNotice(error.message + (error.source === "local" ? " AI сейчас недоступен; выполнена локальная проверка." : ""),true);
+  }
   finally { button.disabled = false; }
 });
 function resetConstructor() {
