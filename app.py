@@ -307,8 +307,8 @@ def seed_demo():
         if db.execute("SELECT 1 FROM tasks WHERE id = 'demo-card-1'").fetchone():
             return False
         for index, (topic, raw, *values) in enumerate(examples):
-            complete_fields = dict(zip(FIELDS, values))
-            fields = complete_fields.copy()
+            complete_fields: dict[str, str] = dict(zip(FIELDS, values))
+            fields: dict[str, str] = complete_fields.copy()
             for missing in (
                 (), ("interaction_format", "contact"),
                 ("data", "interaction_format"),
@@ -321,7 +321,7 @@ def seed_demo():
             encoded_fields = json.dumps(fields, ensure_ascii=False)
             db.execute("INSERT INTO tasks (id, raw_description, topic, fields_json, published_fields_json, status, confirmed_score) VALUES (?, ?, ?, ?, ?, 'confirmed', ?)",
                        (task_id, raw, topic, encoded_fields, encoded_fields, score))
-            draft_fields = {name: "" for name in FIELDS}
+            draft_fields: dict[str, str] = {name: "" for name in FIELDS}
             for name in (
                 (), ("title", "need"), ("title", "context", "need", "users"),
                 ("title", "context", "need", "users", "data", "expected_result"),
