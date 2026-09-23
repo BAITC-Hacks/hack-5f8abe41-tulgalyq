@@ -49,10 +49,18 @@ class AppTest(unittest.TestCase):
             page = response.read().decode("utf-8")
         with urlopen(self.base + "/mobile.css") as response:
             mobile_css = response.read().decode("utf-8")
+        with urlopen(self.base + "/theme.css") as response:
+            theme_css = response.read().decode("utf-8")
         self.assertIn('href="/mobile.css"', page)
-        self.assertIn('data-mobile-view="catalog"', page)
+        self.assertIn('<title>Tulgalyq', page)
+        self.assertIn('href="/theme.css"', page)
+        self.assertIn('id="mobile-menu-toggle"', page)
+        self.assertIn('id="theme-toggle"', page)
+        self.assertIn('id="primary-nav"', page)
         self.assertIn('id="score-details"', page)
-        self.assertIn(".mobile-nav a.active", mobile_css)
+        self.assertIn('.score-panel summary', mobile_css)
+        self.assertIn('html[data-theme="dark"]', theme_css)
+        self.assertIn('.menu-open .sidebar nav', theme_css)
 
     def test_full_flow_and_publication_boundary(self):
         _, task = self.api("/api/tasks", "POST", {"description": "Нужно сократить очередь в столовой", "topic": "Общепит"})

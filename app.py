@@ -1,4 +1,4 @@
-"""Mission 100: a small, dependency-free hackathon application."""
+"""Tulgalyq: a small, dependency-free hackathon application."""
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -384,6 +384,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_file("workspace.css", "text/css; charset=utf-8")
         if path == "/mobile.css":
             return self.serve_file("mobile.css", "text/css; charset=utf-8")
+        if path == "/theme.css":
+            return self.serve_file("theme.css", "text/css; charset=utf-8")
         if path == "/app.js":
             return self.serve_file("app.js", "text/javascript; charset=utf-8")
         if path == "/api/health":
@@ -557,5 +559,5 @@ if __name__ == "__main__":
     init_db()
     port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "127.0.0.1")
-    print("Миссия 100: http://%s:%d" % (host, port), flush=True)
+    print("Tulgalyq: http://%s:%d" % (host, port), flush=True)
     ThreadingHTTPServer((host, port), Handler).serve_forever()

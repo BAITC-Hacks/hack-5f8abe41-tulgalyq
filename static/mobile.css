@@ -19,6 +19,28 @@
 .field-hint { display: block; margin-top: 6px; color: #a35d3b; font-size: 11px; line-height: 1.4; }
 .field-hint[hidden] { display: none; }
 .field-row [aria-invalid="true"] { border-color: #d9a487; background: #fffbf8; }
+body[data-stage="questions"] #constructor-view .hero,
+body[data-stage="card"] #constructor-view .hero { display: none; }
+
+.passport-next { display: grid; gap: 7px; margin-top: 18px; padding: 16px; border-radius: 14px; color: #f2ffeb; background: linear-gradient(145deg, #1c5840, #143d34); }
+.passport-kicker { color: #aee09c; font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+.passport-next strong { font-size: 15px; line-height: 1.35; }
+.score-panel .passport-next p { margin: 0; color: #cbe4d0; font-size: 12px; line-height: 1.5; }
+.passport-next button { justify-self: start; margin-top: 3px; padding: 0; border: 0; background: none; color: #d5f99e; font-size: 12px; font-weight: 800; text-align: left; }
+.passport-next button:hover { text-decoration: underline; }
+.passport-next.complete { background: #e2f2dc; color: #1d6243; }
+.passport-next.complete .passport-kicker, .score-panel .passport-next.complete p { color: #366b50; }
+.passport-summary { margin: 12px 0 28px; padding: 22px; border: 1px solid #d5e8d7; border-radius: 16px; background: #f2f9f0; }
+.passport-summary .passport-kicker { color: #397d50; }
+.passport-summary h3 { margin: 8px 0 7px; font-size: 20px; }
+.passport-summary p { margin: 0 0 12px; color: #496959; font-size: 13px; line-height: 1.55; }
+.passport-summary .passport-review { padding: 11px 13px; border-radius: 9px; background: #fff3df; color: #735625; }
+.passport-gap-list { margin: 8px 0 0; padding-left: 21px; display: grid; gap: 8px; color: #2c5f44; font-size: 13px; line-height: 1.5; }
+.catalog-next { margin: 13px 0; padding: 9px 11px; border-radius: 9px; background: #f4f7ec; color: #446d42; font-size: 12px; font-weight: 750; line-height: 1.4; }
+.page-intro p, .catalog-card p, .workspace-card p, .proposal-card p, .detail-field p { font-size: 14px; }
+.stage-heading p, .hero p { font-size: 14px; }
+.field-row label, .question-row label { font-size: 13px; }
+.primary-button:focus-visible, .secondary-button:focus-visible, .passport-next button:focus-visible, .nav-link:focus-visible, .mobile-nav a:focus-visible { outline: 3px solid #80bd5e; outline-offset: 3px; }
 
 @media (max-width: 700px) {
   body {
@@ -75,12 +97,9 @@
 
   .hero-copy { padding: 24px 23px 25px; }
   .hero h1 { font-size: clamp(27px, 8vw, 36px); line-height: 1.12; margin: 14px 0 10px; }
-  .hero p { font-size: 13px; line-height: 1.55; }
+  .hero p { font-size: 14px; line-height: 1.55; }
   .hero-meta { margin-top: 20px; gap: 7px; flex-wrap: wrap; font-size: 9px; }
   .hero-meta i { width: 12px; }
-  body[data-stage="questions"] #constructor-view .hero,
-  body[data-stage="card"] #constructor-view .hero { display: none; }
-
   .stage-card {
     margin-top: 0;
     padding: 22px 20px;
@@ -91,7 +110,7 @@
   #draft-section { margin-top: 18px; }
   .stage-heading { margin-bottom: 19px; gap: 12px; }
   .stage-heading h2 { font-size: 21px; }
-  .stage-heading p { font-size: 12px; line-height: 1.5; }
+  .stage-heading p { font-size: 13px; line-height: 1.5; }
   .stage-icon { flex: 0 0 34px; }
 
   input, textarea, select { font-size: 16px; }
@@ -142,14 +161,14 @@
 
   .page-intro { padding: 15px 2px 10px; }
   .page-intro h1 { font-size: 29px; margin: 8px 0 5px; }
-  .page-intro p { font-size: 12px; }
+  .page-intro p { font-size: 14px; }
   .workspace-actions { gap: 12px; }
   .workspace-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; gap: 7px; }
   .workspace-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding: 10px; font-size: 9px; }
   .workspace-stat b { font-size: 18px; }
   .workspace-card, .catalog-card { padding: 19px; border-radius: 17px; }
   .workspace-card h2, .catalog-card h2 { font-size: 17px; }
-  .workspace-card p, .catalog-card p { font-size: 12px; min-height: 0; }
+  .workspace-card p, .catalog-card p { font-size: 14px; min-height: 0; }
   .workspace-card .workspace-actions-row button { min-width: 130px; }
 
   .recommendations-panel { padding: 0; margin: 6px 0 20px; }
@@ -181,6 +200,7 @@
   .toolbar button { width: 100%; }
   .catalog-grid { gap: 12px; }
   .catalog-card h2 { margin: 10px 0 7px; }
+  .catalog-next { margin: 11px 0; }
   .catalog-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
   .catalog-footer .rating-chip { justify-self: start; }
   .catalog-footer button { grid-column: 1 / -1; width: 100%; margin: 0; }

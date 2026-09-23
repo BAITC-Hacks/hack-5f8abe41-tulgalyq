@@ -6,6 +6,17 @@ const FIELD_LABELS = {
   contact: "Контакт бизнеса", interaction_format: "Формат взаимодействия"
 };
 const WEIGHTS = {context:10,need:10,data:20,expected_result:15,success_criteria:15,constraints:10,users:10,contact:5,interaction_format:5};
+const IMPROVEMENT_QUESTIONS = {
+  context: "Как устроен процесс сейчас и где возникает проблема?",
+  need: "Что конкретно должно измениться для бизнеса?",
+  data: "Какие данные, примеры или источники получит команда?",
+  expected_result: "Что именно команда должна передать в конце?",
+  success_criteria: "Как бизнес измерит, что решение сработало?",
+  constraints: "Какие сроки, доступы и технические границы нужно учесть?",
+  users: "Кто будет пользоваться результатом?",
+  contact: "Как команда свяжется с ответственным представителем?",
+  interaction_format: "Как часто бизнес сможет давать обратную связь?"
+};
 const PLACEHOLDERS = new Set(["тест","test","нет","незнаю","потом","заполнить","xxx","asdf","qwerty","йцукен"]);
 const READINESS_LABELS = {low:"Нужно уточнить",medium:"Рабочая",high:"Готовая",priority:"Приоритетная"};
 let currentTask = null;
@@ -14,6 +25,41 @@ let proposalTaskFilterValue = "";
 let pendingQuestionAnswers = {};
 const $ = (id) => document.getElementById(id);
 const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value !== undefined) node.textContent = value; return node; };
+
+const themeToggle = $("theme-toggle");
+function setTheme(theme) {
+  const dark = theme === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  themeToggle.setAttribute("aria-pressed", String(dark));
+  themeToggle.setAttribute("aria-label", dark ? "Включить светлую тему" : "Включить тёмную тему");
+  themeToggle.querySelector("span").textContent = dark ? "☀" : "☾";
+  localStorage.setItem("tulgalyq_theme", dark ? "dark" : "light");
+}
+setTheme(localStorage.getItem("tulgalyq_theme"));
+themeToggle.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+
+const menuToggle = $("mobile-menu-toggle");
+const menuBackdrop = $("menu-backdrop");
+const menuClose = $("mobile-menu-close");
+function setMenuOpen(open, restoreFocus = false) {
+  document.body.classList.toggle("menu-open", open);
+  menuToggle.setAttribute("aria-expanded", String(open));
+  menuBackdrop.hidden = !open;
+  if (open) menuClose.focus();
+  else if (restoreFocus) menuToggle.focus();
+}
+menuToggle.addEventListener("click", () => setMenuOpen(!document.body.classList.contains("menu-open")));
+menuClose.addEventListener("click", () => setMenuOpen(false, true));
+menuBackdrop.addEventListener("click", () => setMenuOpen(false, true));
+$("primary-nav").querySelectorAll("a").forEach(link => link.addEventListener("click", () => {
+  if (document.body.classList.contains("menu-open")) setMenuOpen(false, true);
+}));
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && document.body.classList.contains("menu-open")) setMenuOpen(false, true);
+});
+window.matchMedia("(min-width: 701px)").addEventListener("change", event => {
+  if (event.matches) setMenuOpen(false);
+});
 
 function qualityIssue(name, value) {
   const text = value.trim();
@@ -100,6 +146,20 @@ function updatePreview() {
     : currentTask.rating_needs_review
       ? `Опубликовано ${currentTask.confirmed_score}/100 по прежним правилам. Подтвердите карточку, чтобы пересчитать рейтинг.`
       : "Это предварительный результат. Баллы начислятся после подтверждения.";
+  const blocker = ["title", "need"].find(name => issues[name]);
+  const nextField = blocker || Object.keys(WEIGHTS).filter(name => issues[name]).sort((a,b) => WEIGHTS[b] - WEIGHTS[a])[0];
+  const next = $("passport-next");
+  const nextButton = $("passport-next-button");
+  nextButton.hidden = !nextField;
+  nextButton.dataset.field = nextField || "";
+  if (nextField) {
+    $("passport-next-title").textContent = blocker ? `Для публикации: ${FIELD_LABELS[nextField]}` : `${FIELD_LABELS[nextField]} · до +${WEIGHTS[nextField]}`;
+    $("passport-next-text").textContent = blocker === "title" ? "Назовите миссию так, чтобы команда сразу поняла её суть." : IMPROVEMENT_QUESTIONS[nextField];
+  } else {
+    $("passport-next-title").textContent = confirmed ? "Миссия опубликована" : "Карточка готова к подтверждению";
+    $("passport-next-text").textContent = confirmed ? "Все поля рейтинга заполнены и подтверждены бизнесом." : "Проверьте факты и подтвердите публикацию.";
+  }
+  next.classList.toggle("complete", !nextField);
   const breakdown = $("breakdown-list"); breakdown.replaceChildren();
   Object.entries(WEIGHTS).forEach(([name,weight]) => {
     const filled = !issues[name];
@@ -117,6 +177,13 @@ function updatePreview() {
     row.append(title,points); missing.append(row);
   });
 }
+$("passport-next-button").addEventListener("click", () => {
+  const field = $("passport-next-button").dataset.field;
+  if (!field) return;
+  const input = $("field-"+field);
+  input.scrollIntoView({behavior:"smooth",block:"center"});
+  input.focus({preventScroll:true});
+});
 $("draft-form").addEventListener("submit",async (event)=>{
   event.preventDefault();
   try {
@@ -160,7 +227,10 @@ $("back-to-draft").addEventListener("click",()=>showStage("draft"));
 function showView(view) {
   for (const name of ["constructor", "workspace", "catalog", "proposals"]) {
     $(name+"-view").hidden = name !== view;
-    document.querySelector(`[data-view="${name}"]`).classList.toggle("active", name === view);
+    const link = document.querySelector(`[data-view="${name}"]`);
+    link.classList.toggle("active", name === view);
+    if (name === view) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
   }
   document.querySelectorAll("[data-mobile-view]").forEach(link => {
     const active = link.dataset.mobileView === view;
@@ -255,6 +325,9 @@ async function loadCatalog() {
       const card = el("article", "catalog-card");
       card.append(el("span", "step-tag", task.topic), el("h2", "", task.fields.title || task.raw_description),
         el("p", "", task.fields.need || task.raw_description));
+      const nextField = Object.keys(WEIGHTS).filter(name => task.missing.includes(name)).sort((a,b) => WEIGHTS[b] - WEIGHTS[a])[0];
+      if (task.rating_needs_review) card.append(el("div", "catalog-next", "Рейтинг ждёт перепроверки бизнесом"));
+      else if (nextField) card.append(el("div", "catalog-next", `Что уточнить: ${FIELD_LABELS[nextField]} · до +${WEIGHTS[nextField]}`));
       const footer = el("div", "catalog-footer");
       footer.append(el("span", `rating-chip rating-${task.readiness_level}`, `${task.confirmed_score}/100 · ${READINESS_LABELS[task.readiness_level]}${task.rating_needs_review ? " · перепроверка" : ""}`),
         el("span", "", `${task.proposal_count} откл.`));
@@ -311,7 +384,18 @@ async function openTask(id) {
   Object.entries(FIELD_LABELS).forEach(([key, label]) => {
     const row = el("div", "detail-field"); row.append(el("strong", "", label), el("p", "", task.fields[key] || "Не указано")); grid.append(row);
   });
-  detail.append(grid, el("h3", "", "Предложить решение"));
+  detail.append(grid);
+  const passport = el("section", "passport-summary");
+  passport.append(el("span", "passport-kicker", "ПАСПОРТ МИССИИ"), el("h3", "", "Что известно и что уточнить"),
+    el("p", "", "Поля подтверждены представителем бизнеса. Система не проверяет достоверность фактов."));
+  if (task.rating_needs_review) passport.append(el("p", "passport-review", "Оценка опубликована по прежним правилам. Бизнесу нужно перепроверить карточку и подтвердить новый расчёт."));
+  const gaps = Object.keys(WEIGHTS).filter(name => task.missing.includes(name)).sort((a,b) => WEIGHTS[b] - WEIGHTS[a]).slice(0,3);
+  if (gaps.length) {
+    const gapList = el("ul", "passport-gap-list");
+    gaps.forEach(name => gapList.append(el("li", "", task.rating_needs_review ? IMPROVEMENT_QUESTIONS[name] : `${IMPROVEMENT_QUESTIONS[name]} · до +${WEIGHTS[name]} после подтверждения`)));
+    passport.append(gapList);
+  } else passport.append(el("p", "", "Все поля рейтинга заполнены. Согласуйте детали с бизнесом перед началом работы."));
+  detail.append(passport, el("h3", "", "Предложить решение"));
   const form = el("form", "proposal-form"); form.id = "proposal-form";
   const teamSelect = el("select"); teamSelect.id = "proposal-team";
   teamSelect.setAttribute("aria-label", "Команда");

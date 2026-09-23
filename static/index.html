@@ -3,37 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Миссия 100 — из идеи в задачу</title>
+  <title>Tulgalyq — из идеи в задачу</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/extra.css">
   <link rel="stylesheet" href="/ai.css">
   <link rel="stylesheet" href="/workspace.css">
   <link rel="stylesheet" href="/mobile.css">
+  <link rel="stylesheet" href="/theme.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <a class="brand" href="/" aria-label="Миссия 100, главная">
+      <a class="brand" href="/" aria-label="Tulgalyq, главная">
         <span class="brand-symbol">✳</span>
-        <span>МИССИЯ <strong>100</strong></span>
+        <span>Tulgalyq</span>
       </a>
       <div class="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
-      <nav aria-label="Разделы">
+      <nav id="primary-nav" aria-label="Разделы">
+        <button id="mobile-menu-close" class="mobile-menu-close" type="button" aria-label="Закрыть меню">×</button>
         <a class="nav-link active" href="#constructor" data-view="constructor"><span>◈</span> Конструктор задачи <small>01</small></a>
         <a class="nav-link" href="#workspace" data-view="workspace"><span>◫</span> Задачи бизнеса <small>02</small></a>
         <a class="nav-link" href="#catalog" data-view="catalog"><span>▦</span> Каталог задач <small>03</small></a>
         <a class="nav-link" href="#proposals" data-view="proposals"><span>↗</span> Отклики команд <small>04</small></a>
       </nav>
+      <div class="header-actions">
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Включить тёмную тему" aria-pressed="false"><span aria-hidden="true">☾</span></button>
+        <button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-label="Открыть меню" aria-controls="primary-nav" aria-expanded="false"><span aria-hidden="true">☰</span></button>
+      </div>
       <div class="sidebar-bottom">
         <div class="side-note"><span class="note-icon">✦</span><div><strong>Путь к 100 баллам</strong><p>Чёткая задача привлекает сильные команды.</p></div></div>
         <span>HACKALEM AI · 2026</span>
       </div>
     </aside>
+    <button id="menu-backdrop" class="menu-backdrop" type="button" aria-label="Закрыть меню" hidden></button>
 
     <main>
       <header class="topbar">
-        <a class="mobile-brand" href="#constructor" aria-label="Миссия 100 — конструктор"><span class="mobile-brand-mark" aria-hidden="true">✳</span><span>МИССИЯ <strong>100</strong></span></a>
+        <a class="mobile-brand" href="#constructor" aria-label="Tulgalyq — конструктор"><span class="mobile-brand-mark" aria-hidden="true">✳</span><span>Tulgalyq</span></a>
         <div class="breadcrumbs">Платформа <span>/</span> <span id="current-view-label">Конструктор задачи</span></div>
         <div class="topbar-right"><span class="status-dot"></span> Демо-пространство <span class="avatar">Б</span></div>
       </header>
@@ -70,7 +77,7 @@
         <section id="card-section" class="stage-card" hidden>
           <div class="stage-heading"><div><span class="step-tag">ШАГ 03 / 03</span><h2>Проверьте карточку</h2><p>Система сохранила только введённые вами сведения. Заполните пропуски и подтвердите результат.</p></div><span class="stage-icon">✓</span></div>
           <div class="editor-layout"><form id="card-form"><div id="card-fields"></div><div class="actions"><button class="secondary-button" type="submit">Сохранить изменения</button><button class="primary-button" id="confirm-button" type="button">Подтвердить карточку <span>✓</span></button></div></form>
-          <aside class="score-panel"><div class="score-label">ГОТОВНОСТЬ ЗАДАЧИ</div><div class="score-overview"><div class="score-circle"><strong id="score-number">0</strong><span>/ 100</span></div><div class="score-copy"><div class="score-state" id="score-state">Черновик</div><p id="score-explain">Баллы начисляются после вашего подтверждения.</p></div></div><details id="score-details" open><summary>Как считаются баллы и что улучшить <span aria-hidden="true">⌄</span></summary><div class="score-rule"></div><div class="score-label">РАЗБИВКА ПО ПОЛЯМ</div><div id="breakdown-list" class="breakdown-list"></div><div class="score-rule"></div><div class="score-label">ПУТЬ К 100 БАЛЛАМ</div><div id="missing-list" class="missing-list"></div></details></aside></div>
+          <aside class="score-panel"><div class="score-label">ГОТОВНОСТЬ ЗАДАЧИ</div><div class="score-overview"><div class="score-circle"><strong id="score-number">0</strong><span>/ 100</span></div><div class="score-copy"><div class="score-state" id="score-state">Черновик</div><p id="score-explain">Баллы начисляются после вашего подтверждения.</p></div></div><div id="passport-next" class="passport-next"><span class="passport-kicker">СЛЕДУЮЩИЙ ШАГ</span><strong id="passport-next-title"></strong><p id="passport-next-text"></p><button id="passport-next-button" type="button">Перейти к полю →</button></div><details id="score-details" open><summary>Как считаются баллы и что улучшить <span aria-hidden="true">⌄</span></summary><div class="score-rule"></div><div class="score-label">РАЗБИВКА ПО ПОЛЯМ</div><div id="breakdown-list" class="breakdown-list"></div><div class="score-rule"></div><div class="score-label">ПУТЬ К 100 БАЛЛАМ</div><div id="missing-list" class="missing-list"></div></details></aside></div>
         </section>
       </div>
       <div class="content" id="workspace-view" hidden>
@@ -93,6 +100,5 @@
       </div>
     </main>
   </div>
-  <nav class="mobile-nav" aria-label="Разделы на телефоне"><a href="#constructor" data-mobile-view="constructor"><span aria-hidden="true">✚</span><span>Создать</span></a><a href="#workspace" data-mobile-view="workspace"><span aria-hidden="true">◫</span><span>Миссии</span></a><a href="#catalog" data-mobile-view="catalog"><span aria-hidden="true">▦</span><span>Каталог</span></a><a href="#proposals" data-mobile-view="proposals"><span aria-hidden="true">↗</span><span>Отклики</span></a></nav>
 </body>
 </html>
